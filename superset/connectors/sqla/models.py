@@ -905,7 +905,21 @@ class TableColumn(AuditMixinNullable, ImportExportMixin, CertificationMixin, Mod
                             msg=msg,
                         )
                     ) from ex
-            col = literal_column(expression, type_=type_)
+            # Quote the expression if it contains spaces to prevent SQL parsing issues
+            # For example, "Test column" should not be interpreted as "Test AS column"
+            if (
+                expression
+                and " " in expression
+                and not any(
+                    keyword in expression.upper()
+                    for keyword in ["SELECT", "CASE", "WHEN", "AS", "FROM", "WHERE"]
+                )
+            ):
+                # This looks like a column name with spaces, not a SQL expression
+                # Use column() which properly quotes identifiers
+                col = column(expression, type_=type_)
+            else:
+                col = literal_column(expression, type_=type_)
         else:
             col = column(self.column_name, type_=type_)
         col = self.database.make_sqla_column_compatible(col, label)
@@ -952,7 +966,21 @@ class TableColumn(AuditMixinNullable, ImportExportMixin, CertificationMixin, Mod
                             msg=msg,
                         )
                     ) from ex
-            col = literal_column(expression, type_=type_)
+            # Quote the expression if it contains spaces to prevent SQL parsing issues
+            # For example, "Test column" should not be interpreted as "Test AS column"
+            if (
+                expression
+                and " " in expression
+                and not any(
+                    keyword in expression.upper()
+                    for keyword in ["SELECT", "CASE", "WHEN", "AS", "FROM", "WHERE"]
+                )
+            ):
+                # This looks like a column name with spaces, not a SQL expression
+                # Use column() which properly quotes identifiers
+                col = column(expression, type_=type_)
+            else:
+                col = literal_column(expression, type_=type_)
         else:
             col = column(self.column_name, type_=type_)
         time_expr = self.db_engine_spec.get_timestamp_expr(col, pdf, time_grain)
@@ -1522,7 +1550,21 @@ class SqlaTable(
             is_dttm = col_in_metadata.is_temporal
             pdf = col_in_metadata.python_date_format
         else:
-            sqla_column = literal_column(expression)
+            # Quote the expression if it contains spaces to prevent SQL parsing issues
+            # For example, "Test column" should not be interpreted as "Test AS column"
+            if (
+                expression
+                and " " in expression
+                and not any(
+                    keyword in expression.upper()
+                    for keyword in ["SELECT", "CASE", "WHEN", "AS", "FROM", "WHERE"]
+                )
+            ):
+                # This looks like a column name with spaces, not a SQL expression
+                # Use column() which properly quotes identifiers
+                sqla_column = column(expression)
+            else:
+                sqla_column = literal_column(expression)
             if has_timegrain or force_type_check:
                 try:
                     # probe adhoc column type
