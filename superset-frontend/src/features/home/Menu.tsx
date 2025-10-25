@@ -17,12 +17,11 @@
  * under the License.
  */
 import { useState, useEffect } from 'react';
-import { styled, css, useTheme } from '@superset-ui/core';
+import { styled, css } from '@superset-ui/core';
 import { debounce } from 'lodash';
 import { getUrlParam } from 'src/utils/urlUtils';
 import { MainNav, MenuMode } from '@superset-ui/core/components/Menu';
-import { Tooltip, Grid, Row, Col, Image } from '@superset-ui/core/components';
-import { GenericLink } from 'src/components';
+import { Tooltip, Grid, Row, Col } from '@superset-ui/core/components';
 import { NavLink, useLocation } from 'react-router-dom';
 import { Icons } from '@superset-ui/core/components/Icons';
 import { Typography } from '@superset-ui/core/components/Typography';
@@ -42,7 +41,7 @@ interface MenuProps {
 
 const StyledHeader = styled.header`
   ${({ theme }) => `
-      background-color: ${theme.colorBgContainer};
+      background: linear-gradient(135deg, #1e3a8a 0%, #2563eb 100%);
       border-bottom: 1px solid ${theme.colorBorderSecondary};
       z-index: 10;
 
@@ -83,27 +82,26 @@ const StyledHeader = styled.header`
         }
       }
       .navbar-brand-text {
-        border-left: 1px solid ${theme.colorBorderSecondary};
-        border-right: 1px solid ${theme.colorBorderSecondary};
         height: 100%;
-        color: ${theme.colorText};
-        padding-left: ${theme.sizeUnit * 4}px;
-        padding-right: ${theme.sizeUnit * 4}px;
-        margin-right: ${theme.sizeUnit * 6}px;
-        font-size: ${theme.fontSizeLG}px;
+        color: #ffffff;
+        padding-left: ${theme.sizeUnit * 6}px;
+        padding-right: ${theme.sizeUnit * 8}px;
+        margin-right: ${theme.sizeUnit * 4}px;
+        font-size: 20px;
+        font-weight: 700;
+        letter-spacing: 0.3px;
         float: left;
         display: flex;
         flex-direction: column;
         justify-content: center;
 
         span {
-          max-width: ${theme.sizeUnit * 58}px;
           white-space: nowrap;
-          overflow: hidden;
-          text-overflow: ellipsis;
         }
         @media (max-width: 1127px) {
-          display: none;
+          font-size: 16px;
+          padding-left: ${theme.sizeUnit * 3}px;
+          padding-right: ${theme.sizeUnit * 3}px;
         }
       }
       @media (max-width: 767px) {
@@ -111,6 +109,38 @@ const StyledHeader = styled.header`
           float: none;
         }
       }
+      .main-nav {
+        background: transparent;
+        border-bottom: none;
+
+        .ant-menu-item {
+          color: rgba(255, 255, 255, 0.95);
+          font-weight: 500;
+
+          a {
+            color: rgba(255, 255, 255, 0.95);
+          }
+
+          &:hover {
+            color: #ffffff;
+            background: rgba(255, 255, 255, 0.1);
+
+            a {
+              color: #ffffff;
+            }
+          }
+
+          &.ant-menu-item-selected {
+            color: #ffffff;
+            background: rgba(255, 255, 255, 0.15);
+
+            a {
+              color: #ffffff;
+            }
+          }
+        }
+      }
+
       @media (max-width: 767px) {
         .ant-menu-item {
           padding: 0 ${theme.sizeUnit * 6}px 0
@@ -130,7 +160,7 @@ const { SubMenu } = MainNav;
 const StyledSubMenu = styled(SubMenu)`
   ${({ theme }) => css`
     [data-icon="caret-down"] {
-      color: ${theme.colorIcon};
+      color: rgba(255, 255, 255, 0.8);
       font-size: ${theme.fontSizeXS}px;
       margin-left: ${theme.sizeUnit}px;
     }
@@ -138,11 +168,23 @@ const StyledSubMenu = styled(SubMenu)`
         padding: ${theme.sizeUnit * 2}px ${theme.sizeUnit * 4}px;
         display: flex;
         align-items: center;
-        height: 100%;  &.ant-menu-submenu-active {
-    .ant-menu-title-content {
-      color: ${theme.colorPrimary};
+        height: 100%;
+
+        .ant-menu-title-content {
+          color: rgba(255, 255, 255, 0.95);
+          font-weight: 500;
+        }
+
+        &:hover .ant-menu-title-content {
+          color: #ffffff;
+        }
+
+        &.ant-menu-submenu-active {
+          .ant-menu-title-content {
+            color: #ffffff;
+          }
+        }
     }
-  }
   `}
 `;
 const { useBreakpoint } = Grid;
@@ -160,7 +202,6 @@ export function Menu({
   const [showMenu, setMenu] = useState<MenuMode>('horizontal');
   const screens = useBreakpoint();
   const uiConfig = useUiConfig();
-  const theme = useTheme();
 
   useEffect(() => {
     function handleResize() {
@@ -268,50 +309,8 @@ export function Menu({
     );
   };
   const renderBrand = () => {
-    let link;
-    if (theme.brandLogoUrl) {
-      let style = { padding: '0px', margin: '0px' } as React.CSSProperties;
-      if (theme.brandLogoHeight) {
-        style = { ...style, height: theme.brandLogoHeight, minHeight: '0px' };
-      }
-      if (theme.brandLogoMargin) {
-        style = { ...style, margin: theme.brandLogoMargin };
-      }
-      link = (
-        <Typography.Link
-          href={theme.brandLogoHref}
-          className="navbar-brand"
-          style={style}
-        >
-          <Image
-            preview={false}
-            src={theme.brandLogoUrl}
-            alt={theme.brandLogoAlt || 'Apache Superset'}
-          />
-        </Typography.Link>
-      );
-    } else if (isFrontendRoute(window.location.pathname)) {
-      // ---------------------------------------------------------------------------------
-      // TODO: deprecate this once Theme is fully rolled out
-      // Kept as is for backwards compatibility with the old theme system / superset_config.py
-      link = (
-        <GenericLink className="navbar-brand" to={brand.path}>
-          <Image preview={false} src={brand.icon} alt={brand.alt} />
-        </GenericLink>
-      );
-    } else {
-      link = (
-        <Typography.Link
-          className="navbar-brand"
-          href={brand.path}
-          tabIndex={-1}
-        >
-          <Image preview={false} src={brand.icon} alt={brand.alt} />
-        </Typography.Link>
-      );
-    }
-    // ---------------------------------------------------------------------------------
-    return <>{link}</>;
+    // Hide logo - only show text title
+    return null;
   };
   return (
     <StyledHeader className="top" id="main-menu" role="navigation">
@@ -374,9 +373,26 @@ export function Menu({
 
 // transform the menu data to reorganize components
 export default function MenuWrapper({ data, ...rest }: MenuProps) {
+  // Custom horizontal tabs for Uganda Malaria Data Repository
+  const customTabs: MenuObjectProps[] = [
+    { name: 'Dashboard', label: 'Dashboard', url: '/superset/welcome/', isFrontendRoute: true },
+    { name: 'Analysis', label: 'Analysis', url: '/chart/list/', isFrontendRoute: false },
+    { name: 'Predictions', label: 'Predictions', url: '/predictions/', isFrontendRoute: false },
+    { name: 'DataExports', label: 'Data Exports', url: '/exports/', isFrontendRoute: false },
+    { name: 'Indicators', label: 'Indicators', url: '/indicators/', isFrontendRoute: false },
+    { name: 'Reports', label: 'Reports', url: '/reports/', isFrontendRoute: false },
+    { name: 'Admin', label: 'Admin', url: '/users/list/', isFrontendRoute: false },
+  ];
+
   const newMenuData = {
     ...data,
+    brand: {
+      ...data.brand,
+      text: 'Uganda Malaria Data Repository',
+    },
+    menu: customTabs, // Replace default menu with custom tabs
   };
+
   // Menu items that should go into settings dropdown
   const settingsMenus = {
     Data: true,
