@@ -93,75 +93,21 @@ const StyledTabs = styled(Tabs)`
 const ChartGrid = styled.div`
   ${({ theme }) => `
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(450px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(500px, 1fr));
     gap: ${theme.sizeUnit * 6}px;
     margin-bottom: ${theme.sizeUnit * 6}px;
     margin-top: ${theme.sizeUnit * 4}px;
 
-    @media (max-width: 1400px) {
-      grid-template-columns: repeat(auto-fill, minmax(380px, 1fr));
+    @media (max-width: 1600px) {
+      grid-template-columns: repeat(2, 1fr);
     }
 
     @media (max-width: 1200px) {
-      grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+      grid-template-columns: 1fr;
     }
 
     @media (max-width: 768px) {
       grid-template-columns: 1fr;
-    }
-  `}
-`;
-
-const ChartCard = styled(Card)`
-  ${({ theme }) => `
-    cursor: pointer;
-    transition: all 0.3s ease;
-    border: 1px solid ${theme.colorBorderSecondary};
-    height: 100%;
-    min-height: 380px;
-
-    &:hover {
-      transform: translateY(-4px);
-      box-shadow: 0 12px 32px rgba(0, 0, 0, 0.15);
-      border-color: ${theme.colorPrimary};
-    }
-
-    .ant-card-cover {
-      height: 280px;
-      background: ${theme.colorBgLayout};
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      border-bottom: 1px solid ${theme.colorBorderSecondary};
-      overflow: hidden;
-
-      img {
-        width: 100%;
-        height: 100%;
-        object-fit: cover;
-      }
-
-      .anticon {
-        font-size: 80px !important;
-      }
-    }
-
-    .ant-card-body {
-      padding: ${theme.sizeUnit * 5}px ${theme.sizeUnit * 4}px;
-    }
-
-    .ant-card-meta-title {
-      font-size: 16px;
-      font-weight: 600;
-      color: ${theme.colorText};
-      margin-bottom: ${theme.sizeUnit * 2}px;
-      line-height: 1.4;
-    }
-
-    .ant-card-meta-description {
-      font-size: 14px;
-      color: ${theme.colorTextSecondary};
-      line-height: 1.5;
     }
   `}
 `;
@@ -211,6 +157,7 @@ interface Dashboard {
 interface Category {
   key: string;
   label: string;
+  chartIds: number[];
 }
 
 interface ChartItem {
@@ -227,20 +174,109 @@ interface DashboardContentAreaProps {
   selectedDashboard: Dashboard;
 }
 
-const categories: Category[] = [
-  { key: 'analysis', label: 'Analysis / Dashboards' },
-  { key: 'predictions', label: 'Predictions' },
-  { key: 'exports', label: 'Data Exports' },
-  { key: 'indicators', label: 'Indicators' },
-  { key: 'reports', label: 'Reports' },
+interface DashboardLayout {
+  [key: string]: {
+    id: string;
+    type: string;
+    meta?: {
+      text?: string;
+    };
+    children?: string[];
+  };
+}
+
+// Default fallback categories if dashboard has no tabs
+const DEFAULT_CATEGORIES: Category[] = [
+  { key: 'all', label: 'All Charts', chartIds: [] },
 ];
+
+// Extract tabs and their chart IDs from dashboard layout
+function extractTabsFromLayout(positionData: DashboardLayout): Category[] {
+  const categories: Category[] = [];
+
+  console.log('Analyzing position data structure...');
+  console.log('All component types:', Object.entries(positionData).map(([k, v]) => `${k}: ${v.type}`));
+
+  // Find TABS components in the layout
+  Object.entries(positionData).forEach(([key, component]) => {
+    console.log(`Checking component ${key} with type ${component.type}`);
+
+    if (component.type === 'TABS') {
+      console.log('Found TABS component:', key, component);
+      // Get tab children
+      const tabChildren = component.children || [];
+      console.log('Tab children:', tabChildren);
+
+      tabChildren.forEach(tabId => {
+        const tabComponent = positionData[tabId];
+        console.log(`Checking tab ${tabId}:`, tabComponent);
+
+        if (tabComponent && tabComponent.type === 'TAB') {
+          const tabName = tabComponent.meta?.text || 'Untitled Tab';
+          const chartIds = extractChartIdsFromComponent(
+            tabComponent,
+            positionData,
+          );
+
+          console.log(`Tab "${tabName}" has chart IDs:`, chartIds);
+
+          categories.push({
+            key: tabId,
+            label: tabName,
+            chartIds,
+          });
+        }
+      });
+    }
+  });
+
+  console.log('Final extracted categories:', categories);
+  return categories;
+}
+
+// Recursively extract chart IDs from a component and its children
+function extractChartIdsFromComponent(
+  component: DashboardLayout[string],
+  layout: DashboardLayout,
+): number[] {
+  const chartIds: number[] = [];
+
+  if (component.type === 'CHART') {
+    // Try different possible fields for chart ID
+    const meta = component.meta as any;
+    const sliceId = meta?.chartId || meta?.sliceId || meta?.slice_id;
+
+    console.log('Found CHART component with meta:', meta, 'extracted sliceId:', sliceId);
+
+    if (sliceId) {
+      chartIds.push(sliceId);
+    }
+  }
+
+  // Recursively check children
+  if (component.children) {
+    component.children.forEach(childId => {
+      const childComponent = layout[childId];
+      if (childComponent) {
+        chartIds.push(...extractChartIdsFromComponent(childComponent, layout));
+      }
+    });
+  }
+
+  return chartIds;
+}
 
 export default function DashboardContentArea({
   selectedDashboard,
 }: DashboardContentAreaProps) {
-  const [activeCategory, setActiveCategory] = useState('analysis');
+  console.log('DashboardContentArea rendered with dashboard:', selectedDashboard);
+
+  const [activeCategory, setActiveCategory] = useState('all');
   const [allCharts, setAllCharts] = useState<ChartItem[]>([]);
+  const [categories, setCategories] = useState<Category[]>(DEFAULT_CATEGORIES);
   const [loading, setLoading] = useState(true);
+
+  console.log('Current state - categories:', categories, 'activeCategory:', activeCategory);
 
   useEffect(() => {
     if (!selectedDashboard) {
@@ -248,10 +284,53 @@ export default function DashboardContentArea({
       return;
     }
 
-    const fetchCharts = async () => {
+    const fetchDashboardData = async () => {
+      console.log('=== FETCHING DASHBOARD DATA ===');
+      console.log('Selected dashboard:', selectedDashboard);
+
+      // Reset state when switching dashboards
       setLoading(true);
+      setAllCharts([]);
+      setCategories(DEFAULT_CATEGORIES);
+      setActiveCategory('all');
       try {
-        // Fetch all charts and filter by dashboard
+        // Fetch dashboard details including position_json
+        const dashboardResponse = await SupersetClient.get({
+          endpoint: `/api/v1/dashboard/${selectedDashboard.id}`,
+        });
+
+        const dashboardData = dashboardResponse.json.result;
+        console.log('Full dashboard data:', dashboardData);
+
+        const positionData = dashboardData.position_json || {};
+        console.log('Position data type:', typeof positionData);
+        console.log('Position data is string?', typeof positionData === 'string');
+
+        // If position_json is a string, parse it
+        let parsedPositionData = positionData;
+        if (typeof positionData === 'string') {
+          console.log('Parsing position_json string...');
+          parsedPositionData = JSON.parse(positionData);
+        }
+
+        console.log('Dashboard position data (parsed):', parsedPositionData);
+
+        // Extract tabs and their charts from position_json
+        const extractedCategories = extractTabsFromLayout(parsedPositionData);
+
+        console.log('Extracted categories from dashboard:', extractedCategories);
+
+        if (extractedCategories.length > 0) {
+          setCategories(extractedCategories);
+          setActiveCategory(extractedCategories[0].key);
+        } else {
+          // No tabs found, use default single category with all charts
+          console.log('No tabs found in dashboard, using default "All Charts" category');
+          setCategories(DEFAULT_CATEGORIES);
+          setActiveCategory('all');
+        }
+
+        // Fetch all charts for this dashboard
         const chartsResponse = await SupersetClient.get({
           endpoint: `/api/v1/chart/?q=${JSON.stringify({
             filters: [
@@ -269,36 +348,38 @@ export default function DashboardContentArea({
         const charts = chartsResponse.json.result || [];
         setAllCharts(charts);
       } catch (error) {
-        console.error('Error fetching dashboard charts:', error);
+        console.error('Error fetching dashboard data:', error);
         setAllCharts([]);
+        setCategories(DEFAULT_CATEGORIES);
       } finally {
         setLoading(false);
       }
     };
 
-    fetchCharts();
+    fetchDashboardData();
   }, [selectedDashboard?.id]);
 
-  // Filter charts by active category based on tags
+  // Filter charts by active category
   const getChartsForCategory = (categoryKey: string): ChartItem[] => {
-    // For 'analysis' category, show ALL charts regardless of tags
-    if (categoryKey === 'analysis') {
+    const currentCategory = categories.find(cat => cat.key === categoryKey);
+
+    // If it's the default "all" category or no chart IDs specified, show all charts
+    if (categoryKey === 'all' || !currentCategory || currentCategory.chartIds.length === 0) {
       return allCharts;
     }
 
-    // For other categories, only show charts with matching tags
-    return allCharts.filter(chart => {
-      const hasMatchingTag = chart.tags?.some(
-        tag => tag.name === `category:${categoryKey}`,
-      );
-      return hasMatchingTag;
-    });
+    // Filter charts based on the tab's chart IDs
+    return allCharts.filter(chart => currentCategory.chartIds.includes(chart.id));
   };
 
   const allChartsForCategory = getChartsForCategory(activeCategory);
-  // Show only first 2 charts as preview
-  const charts = allChartsForCategory.slice(0, 2);
-  const hasMoreCharts = allChartsForCategory.length > 2;
+  // Show first 5 charts as preview
+  const charts = allChartsForCategory.slice(0, 5);
+  const hasMoreCharts = allChartsForCategory.length > 5;
+
+  console.log('Rendering charts for category:', activeCategory);
+  console.log('All charts for this category:', allChartsForCategory);
+  console.log('Charts to display (first 5):', charts);
 
   const handleViewDashboard = () => {
     window.location.href = selectedDashboard.url;
