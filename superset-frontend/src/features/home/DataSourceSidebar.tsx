@@ -17,8 +17,9 @@
  * under the License.
  */
 
-import { styled } from '@superset-ui/core';
-import { Menu } from 'antd';
+import { useState, useEffect } from 'react';
+import { styled, SupersetClient, t } from '@superset-ui/core';
+import { Menu, Spin } from 'antd';
 import { Icons } from '@superset-ui/core/components/Icons';
 
 const StyledSidebar = styled.div`
@@ -94,79 +95,105 @@ const SidebarTitle = styled.div`
   `}
 `;
 
-interface DataSourceItem {
-  key: string;
-  label: string;
-  icon: React.ReactNode;
-  url?: string;
+const LoadingContainer = styled.div`
+  ${({ theme }) => `
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    padding: ${theme.sizeUnit * 8}px;
+  `}
+`;
+
+interface Dashboard {
+  id: number;
+  dashboard_title: string;
+  slug: string;
+  url: string;
 }
 
-const dataSourceCategories: DataSourceItem[] = [
-  {
-    key: 'routine-chmis',
-    label: 'Routine eCHMIS Data',
-    icon: <Icons.DatabaseOutlined />,
-    url: '/routine-chmis',
-  },
-  {
-    key: 'surveillance',
-    label: 'Surveillance',
-    icon: <Icons.EyeOutlined />,
-    url: '/surveillance',
-  },
-  {
-    key: 'case-management',
-    label: 'Case Management / Prevention',
-    icon: <Icons.UserOutlined />,
-    url: '/case-management',
-  },
-  {
-    key: 'meteorological',
-    label: 'Meteorological / Environmental Data',
-    icon: <Icons.ThunderboltOutlined />,
-    url: '/meteorological',
-  },
-  {
-    key: 'vector-control',
-    label: 'Vector Control',
-    icon: <Icons.BugOutlined />,
-    url: '/vector-control',
-  },
-  {
-    key: 'facility-list',
-    label: 'Master Facility List',
-    icon: <Icons.AppstoreOutlined />,
-    url: '/facility-list',
-  },
-  {
-    key: 'survey-data',
-    label: 'Survey Data',
-    icon: <Icons.FileTextOutlined />,
-    url: '/survey-data',
-  },
-];
+interface DataSourceSidebarProps {
+  selectedKey?: string;
+  onSelect?: (dashboard: Dashboard) => void;
+}
 
-export default function DataSourceSidebar() {
+export default function DataSourceSidebar({
+  selectedKey,
+  onSelect,
+}: DataSourceSidebarProps) {
+  const [dashboards, setDashboards] = useState<Dashboard[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const fetchDashboards = async () => {
+      setLoading(true);
+      try {
+        const response = await SupersetClient.get({
+          endpoint: `/api/v1/dashboard/?q=${JSON.stringify({
+            page: 0,
+            page_size: 100,
+            order_column: 'dashboard_title',
+            order_direction: 'asc',
+          })}`,
+        });
+        const fetchedDashboards = response.json.result || [];
+        setDashboards(fetchedDashboards);
+
+        // Auto-select first dashboard if none selected
+        if (fetchedDashboards.length > 0 && !selectedKey && onSelect) {
+          onSelect(fetchedDashboards[0]);
+        }
+      } catch (error) {
+        console.error('Error fetching dashboards:', error);
+        setDashboards([]);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchDashboards();
+  }, []);
+
   const handleMenuClick = ({ key }: { key: string }) => {
-    const item = dataSourceCategories.find(cat => cat.key === key);
-    if (item?.url) {
-      window.location.href = item.url;
+    const dashboard = dashboards.find(d => d.id.toString() === key);
+    if (dashboard && onSelect) {
+      onSelect(dashboard);
     }
   };
 
+  if (loading) {
+    return (
+      <StyledSidebar>
+        <SidebarTitle>{t('Dashboards')}</SidebarTitle>
+        <LoadingContainer>
+          <Spin />
+        </LoadingContainer>
+      </StyledSidebar>
+    );
+  }
+
   return (
     <StyledSidebar>
-      <SidebarTitle>Data Sources</SidebarTitle>
-      <StyledMenu
-        mode="inline"
-        defaultSelectedKeys={['routine-chmis']}
-        onClick={handleMenuClick}
-        items={dataSourceCategories.map(item => ({
-          key: item.key,
-          icon: item.icon,
-          label: item.label,
-        }))}
-      />
+      <SidebarTitle>{t('Dashboards')}</SidebarTitle>
+      {dashboards.length === 0 ? (
+        <LoadingContainer>
+          <span style={{ color: '#999' }}>
+            {t('No dashboards available')}
+          </span>
+        </LoadingContainer>
+      ) : (
+        <StyledMenu
+          mode="inline"
+          selectedKeys={selectedKey ? [selectedKey] : []}
+          onClick={handleMenuClick}
+          items={dashboards.map(dashboard => ({
+            key: dashboard.id.toString(),
+            icon: <Icons.DashboardOutlined />,
+            label: dashboard.dashboard_title,
+          }))}
+        />
+      )}
     </StyledSidebar>
   );
 }
+
+export type { Dashboard };

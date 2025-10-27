@@ -290,7 +290,8 @@ class SupersetAppInitializer:  # pylint: disable=too-many-public-methods
             "Home",
             label=_("Home"),
             href="/superset/welcome/",
-            cond=lambda: bool(current_app.config["LOGO_TARGET_PATH"]),
+            category="",
+            category_icon="",
         )
 
         appbuilder.add_view(

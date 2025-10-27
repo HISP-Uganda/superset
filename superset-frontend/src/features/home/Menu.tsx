@@ -216,6 +216,7 @@ export function Menu({
   }, []);
 
   enum Paths {
+    Home = '/superset/welcome',
     Explore = '/explore',
     Dashboard = '/dashboard',
     Chart = '/chart',
@@ -228,6 +229,9 @@ export function Menu({
   useEffect(() => {
     const path = location.pathname;
     switch (true) {
+      case path.startsWith(Paths.Home):
+        setActiveTabs(['Home']);
+        break;
       case path.startsWith(Paths.Dashboard):
         setActiveTabs(['Dashboards']);
         break;
@@ -373,24 +377,12 @@ export function Menu({
 
 // transform the menu data to reorganize components
 export default function MenuWrapper({ data, ...rest }: MenuProps) {
-  // Custom horizontal tabs for Uganda Malaria Data Repository
-  const customTabs: MenuObjectProps[] = [
-    { name: 'Dashboard', label: 'Dashboard', url: '/superset/welcome/', isFrontendRoute: true },
-    { name: 'Analysis', label: 'Analysis', url: '/chart/list/', isFrontendRoute: false },
-    { name: 'Predictions', label: 'Predictions', url: '/predictions/', isFrontendRoute: false },
-    { name: 'DataExports', label: 'Data Exports', url: '/exports/', isFrontendRoute: false },
-    { name: 'Indicators', label: 'Indicators', url: '/indicators/', isFrontendRoute: false },
-    { name: 'Reports', label: 'Reports', url: '/reports/', isFrontendRoute: false },
-    { name: 'Admin', label: 'Admin', url: '/users/list/', isFrontendRoute: false },
-  ];
-
   const newMenuData = {
     ...data,
     brand: {
       ...data.brand,
       text: 'Uganda Malaria Data Repository',
     },
-    menu: customTabs, // Replace default menu with custom tabs
   };
 
   // Menu items that should go into settings dropdown

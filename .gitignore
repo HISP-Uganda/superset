@@ -134,3 +134,7 @@ PROJECT.md
 .aider*
 .claude_rc*
 .env.local
+
+# Temporary documentation files
+TODO.md
+CHART_TAGGING_GUIDE.md

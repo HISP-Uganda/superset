@@ -27,7 +27,7 @@ import { isUserAdmin } from 'src/dashboard/util/permissionUtils';
 import getBootstrapData from 'src/utils/getBootstrapData';
 
 // not lazy loaded since this is the home page.
-import Home from 'src/pages/Home';
+import EnhancedHome from 'src/pages/Home/EnhancedHome';
 
 const ChartCreation = lazy(
   () =>
@@ -197,7 +197,7 @@ export const routes: Routes = [
   },
   {
     path: '/superset/welcome/',
-    Component: Home,
+    Component: EnhancedHome,
   },
   {
     path: '/dashboard/list/',

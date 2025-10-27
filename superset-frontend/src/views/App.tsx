@@ -30,7 +30,6 @@ import { Layout, Loading } from '@superset-ui/core/components';
 import { setupAGGridModules } from '@superset-ui/core/components/ThemedAgGridReact';
 import { ErrorBoundary } from 'src/components';
 import Menu from 'src/features/home/Menu';
-import DataSourceSidebar from 'src/features/home/DataSourceSidebar';
 import getBootstrapData, { applicationRoot } from 'src/utils/getBootstrapData';
 import ToastContainer from 'src/components/MessageToasts/ToastContainer';
 import setupApp from 'src/setup/setupApp';
@@ -82,7 +81,6 @@ const App = () => (
         data={bootstrapData.common.menu_data}
         isFrontendRoute={isFrontendRoute}
       />
-      <DataSourceSidebar />
       <Switch>
         {routes.map(({ path, Component, props = {}, Fallback = Loading }) => (
           <Route path={path} key={path}>
@@ -92,10 +90,6 @@ const App = () => (
                   css={css`
                     display: flex;
                     flex-direction: column;
-                    margin-left: 280px;
-                    @media (max-width: 768px) {
-                      margin-left: 0;
-                    }
                   `}
                 >
                   <ErrorBoundary
