@@ -130,18 +130,27 @@ else
     fi
 fi
 
-# Step 4: Fix known dependency issues
-echo -e "${YELLOW}[4/8] Fixing known dependency issues...${NC}"
+# Step 4: Install missing peer dependencies
+echo -e "${YELLOW}[4/8] Installing missing peer dependencies...${NC}"
 
-# Fix currencyformatter.js missing in just-handlebars-helpers
-if [ -d "plugins/plugin-chart-handlebars/node_modules/just-handlebars-helpers" ]; then
-    echo "Fixing currencyformatter.js..."
-    cd plugins/plugin-chart-handlebars
-    npm install currencyformatter.js 2>/dev/null || echo "Note: currencyformatter.js fix skipped"
-    cd "${PROJECT_ROOT}/superset-frontend"
-fi
+# List of commonly missing peer dependencies
+MISSING_DEPS=(
+    "@react-spring/web"
+    "global-box"
+    "query-string"
+    "@deck.gl/mesh-layers"
+    "@deck.gl/extensions"
+    "@deck.gl/widgets"
+)
 
-echo -e "${GREEN}✓ Dependencies checked${NC}"
+echo "Installing missing peer dependencies..."
+for dep in "${MISSING_DEPS[@]}"; do
+    echo "  - $dep"
+done
+
+npm install --legacy-peer-deps --save-dev "${MISSING_DEPS[@]}"
+
+echo -e "${GREEN}✓ Missing dependencies installed${NC}"
 
 # Step 5: Build frontend
 echo -e "${YELLOW}[5/8] Building frontend (this may take 5-10 minutes)...${NC}"
