@@ -19,7 +19,7 @@
 
 import { useState, useEffect } from 'react';
 import { styled, t, SupersetClient } from '@superset-ui/core';
-import { Tabs, Empty, Card, Spin, Button } from 'antd';
+import { Tabs, Empty, Spin, Button } from 'antd';
 import { Icons } from '@superset-ui/core/components/Icons';
 
 const ContentContainer = styled.div`
