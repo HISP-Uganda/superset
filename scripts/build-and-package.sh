@@ -26,36 +26,54 @@ echo ""
 
 # Step 1: Check and install/upgrade Node.js/npm if needed
 echo -e "${YELLOW}[1/8] Checking Node.js and npm installation...${NC}"
+echo "Superset requires: Node.js ^20.18.1 and npm ^10.8.1"
+echo ""
+
 NODE_VERSION=""
 if command -v node &> /dev/null; then
     NODE_VERSION=$(node --version)
     NODE_MAJOR=$(echo "$NODE_VERSION" | cut -d'.' -f1 | sed 's/v//')
     echo "Current Node.js version: ${NODE_VERSION}"
 
-    if [ "$NODE_MAJOR" -lt 22 ]; then
-        echo -e "${YELLOW}Node.js 22.x or higher is recommended.${NC}"
-        read -p "Do you want to upgrade to Node.js 22.x? (y/n): " -n 1 -r
+    if [ "$NODE_MAJOR" -lt 20 ]; then
+        echo -e "${YELLOW}Node.js 20.x is required (you have ${NODE_VERSION}).${NC}"
+        read -p "Do you want to upgrade to Node.js 20.x? (y/n): " -n 1 -r
         echo
         if [[ $REPLY =~ ^[Yy]$ ]]; then
-            echo "Upgrading to Node.js 22.x..."
-            curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
+            echo "Upgrading to Node.js 20.x..."
+            curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
             sudo apt-get install -y nodejs
             echo -e "${GREEN}✓ Node.js upgraded to $(node --version)${NC}"
         else
-            echo -e "${YELLOW}Continuing with Node.js ${NODE_VERSION}${NC}"
+            echo -e "${YELLOW}WARNING: Continuing with Node.js ${NODE_VERSION} (may cause build issues)${NC}"
+        fi
+    elif [ "$NODE_MAJOR" -gt 20 ]; then
+        echo -e "${YELLOW}Node.js ${NODE_VERSION} is newer than required 20.x${NC}"
+        read -p "Do you want to downgrade to Node.js 20.x? (y/n): " -n 1 -r
+        echo
+        if [[ $REPLY =~ ^[Yy]$ ]]; then
+            echo "Uninstalling current Node.js..."
+            sudo apt-get remove -y nodejs
+            sudo apt-get autoremove -y
+            echo "Installing Node.js 20.x..."
+            curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+            sudo apt-get install -y nodejs
+            echo -e "${GREEN}✓ Node.js downgraded to $(node --version)${NC}"
+        else
+            echo -e "${YELLOW}WARNING: Continuing with Node.js ${NODE_VERSION} (may cause build issues)${NC}"
         fi
     else
-        echo -e "${GREEN}✓ Node.js version is sufficient${NC}"
+        echo -e "${GREEN}✓ Node.js version is compatible${NC}"
     fi
 else
     echo -e "${RED}Node.js not found.${NC}"
-    read -p "Do you want to install Node.js 22.x? (y/n): " -n 1 -r
+    read -p "Do you want to install Node.js 20.x? (y/n): " -n 1 -r
     echo
     if [[ $REPLY =~ ^[Yy]$ ]]; then
-        echo "Installing Node.js 22.x..."
-        curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
+        echo "Installing Node.js 20.x..."
+        curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
         sudo apt-get install -y nodejs
-        echo -e "${GREEN}✓ Node.js installed${NC}"
+        echo -e "${GREEN}✓ Node.js installed: $(node --version)${NC}"
     else
         echo -e "${RED}Node.js is required. Exiting.${NC}"
         exit 1
@@ -69,7 +87,7 @@ if ! command -v npm &> /dev/null; then
     if [[ $REPLY =~ ^[Yy]$ ]]; then
         echo "Installing npm..."
         sudo apt-get install -y npm
-        echo -e "${GREEN}✓ npm installed${NC}"
+        echo -e "${GREEN}✓ npm installed: $(npm --version)${NC}"
     else
         echo -e "${RED}npm is required. Exiting.${NC}"
         exit 1
@@ -92,7 +110,7 @@ if [ ! -d "node_modules" ]; then
     echo
     if [[ $REPLY =~ ^[Yy]$ ]]; then
         echo "Installing npm dependencies..."
-        npm ci
+        npm ci --legacy-peer-deps
         echo -e "${GREEN}✓ Dependencies installed${NC}"
     else
         echo -e "${RED}Dependencies are required. Exiting.${NC}"
@@ -100,12 +118,12 @@ if [ ! -d "node_modules" ]; then
     fi
 else
     echo "Dependencies found."
-    read -p "Reinstall dependencies to ensure they're up-to-date? (y/n): " -n 1 -r
+    read -p "Clean reinstall dependencies? This will use npm ci (recommended). (y/n): " -n 1 -r
     echo
     if [[ $REPLY =~ ^[Yy]$ ]]; then
-        echo "Reinstalling npm dependencies..."
-        rm -rf node_modules package-lock.json
-        npm install
+        echo "Clean reinstalling npm dependencies..."
+        rm -rf node_modules
+        npm ci --legacy-peer-deps
         echo -e "${GREEN}✓ Dependencies reinstalled${NC}"
     else
         echo -e "${GREEN}✓ Using existing dependencies${NC}"
