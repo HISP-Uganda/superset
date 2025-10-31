@@ -105,7 +105,30 @@ class CeleryConfig:
 
 CELERY_CONFIG = CeleryConfig
 
-FEATURE_FLAGS = {"ALERT_REPORTS": True}
+# ==============================================================================
+# PUBLIC ACCESS CONFIGURATION (Uganda Malaria Data Repository)
+# ==============================================================================
+
+# Enable public role - allows unauthenticated users to view dashboards
+PUBLIC_ROLE_LIKE = "Gamma"  # Grant Public role same read permissions as Gamma
+AUTH_ROLE_PUBLIC = "Public"  # Name of the public role
+
+# Note: After enabling this, you must:
+# 1. Create the "Public" role via UI (Security -> List Roles)
+# 2. Grant specific dashboard permissions to the Public role
+# 3. Public users will then see those dashboards without login
+
+# ==============================================================================
+# FEATURE FLAGS
+# ==============================================================================
+
+FEATURE_FLAGS = {
+    "ALERT_REPORTS": True,
+    "DASHBOARD_RBAC": True,      # Enable role-based dashboard access control
+    "EMBEDDED_SUPERSET": True,   # Enable embedded dashboards (for MOH website)
+    "TAGGING_SYSTEM": True,      # Enable dashboard tagging/organization
+}
+
 ALERT_REPORTS_NOTIFICATION_DRY_RUN = True
 WEBDRIVER_BASEURL = f"http://superset_app{os.environ.get('SUPERSET_APP_ROOT', '/')}/"  # When using docker compose baseurl should be http://superset_nginx{ENV{BASEPATH}}/  # noqa: E501
 # The base URL for the email report hyperlinks.

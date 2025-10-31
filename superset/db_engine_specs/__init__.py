@@ -190,6 +190,11 @@ def get_available_engine_specs() -> dict[type[BaseEngineSpec], set[str]]:  # noq
                 if driver:
                     break
 
+        # If no installed drivers found, check if engine spec has class-level drivers attribute
+        # This allows custom/API-based engines like DHIS2 that don't have SQLAlchemy dialects
+        if not driver and hasattr(engine_spec, "drivers") and engine_spec.drivers:
+            driver = set(engine_spec.drivers.keys())
+
         available_engines[engine_spec] = driver
 
     return available_engines

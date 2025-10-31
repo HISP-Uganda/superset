@@ -28,6 +28,8 @@ import getBootstrapData from 'src/utils/getBootstrapData';
 
 // not lazy loaded since this is the home page.
 import EnhancedHome from 'src/pages/Home/EnhancedHome';
+// Public landing page for unauthenticated users
+import PublicLandingPage from 'src/pages/PublicLandingPage';
 
 const ChartCreation = lazy(
   () =>
@@ -198,6 +200,10 @@ export const routes: Routes = [
   {
     path: '/superset/welcome/',
     Component: EnhancedHome,
+  },
+  {
+    path: '/superset/public/',
+    Component: PublicLandingPage,
   },
   {
     path: '/dashboard/list/',

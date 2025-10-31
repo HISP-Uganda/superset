@@ -57,6 +57,17 @@ enum AuthType {
   AuthOauth = 4,
 }
 
+const FullscreenWrapper = styled.div`
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: ${({ theme }) => theme.colorBgBase};
+  z-index: 9999;
+  overflow-y: auto;
+`;
+
 const StyledCard = styled(Card)`
   ${({ theme }) => css`
     max-width: 400px;
@@ -150,15 +161,16 @@ export default function Login() {
   };
 
   return (
-    <Flex
-      justify="center"
-      align="center"
-      data-test="login-form"
-      css={css`
-        width: 100%;
-        height: calc(100vh - 200px);
-      `}
-    >
+    <FullscreenWrapper>
+      <Flex
+        justify="center"
+        align="center"
+        data-test="login-form"
+        css={css`
+          width: 100%;
+          min-height: 100vh;
+        `}
+      >
       <StyledCard title={t('Sign in')} padded>
         {authType === AuthType.AuthOID && (
           <Flex justify="center" vertical gap="middle">
@@ -235,6 +247,8 @@ export default function Login() {
               </Form.Item>
               <Form.Item label={null}>
                 <Flex
+                  vertical
+                  gap="middle"
                   css={css`
                     width: 100%;
                   `}
@@ -258,12 +272,21 @@ export default function Login() {
                       {t('Register')}
                     </Button>
                   )}
+                  <Button
+                    block
+                    type="default"
+                    href="/superset/public/"
+                    data-test="back-to-public-button"
+                  >
+                    ← {t('Back to Public Dashboards')}
+                  </Button>
                 </Flex>
               </Form.Item>
             </Form>
           </Flex>
         )}
       </StyledCard>
-    </Flex>
+      </Flex>
+    </FullscreenWrapper>
   );
 }

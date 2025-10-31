@@ -65,6 +65,7 @@ setup(
             "postgres.psycopg2 = sqlalchemy.dialects.postgresql:dialect",
             "postgres = sqlalchemy.dialects.postgresql:dialect",
             "superset = superset.extensions.metadb:SupersetAPSWDialect",
+            "dhis2 = superset.db_engine_specs.dhis2_dialect:DHIS2Dialect",
         ],
         "shillelagh.adapter": [
             "superset=superset.extensions.metadb:SupersetShillelaghAdapter"

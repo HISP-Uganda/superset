@@ -54,8 +54,8 @@ const ExtensionsStartup = () => {
   const [initialized, setInitialized] = useState(false);
 
   const userId = useSelector<RootState, number | undefined>(
-    ({ user }) => user.userId,
-  );
+  ({ user }) => user?.userId,
+);
 
   useEffect(() => {
     // Skip initialization if already initialized or if user is not logged in

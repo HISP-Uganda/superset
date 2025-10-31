@@ -907,6 +907,17 @@ class Superset(BaseSupersetView):
 
         return self.render_app_template(extra_bootstrap_data=payload)
 
+    @event_logger.log_this
+    @expose("/public/")
+    def public_landing(self) -> FlaskResponse:
+        """Public landing page accessible without authentication"""
+        # Allow anonymous users - provide minimal bootstrap data
+        payload = {
+            "user": bootstrap_user_data(g.user if g.user else None, include_perms=True),
+            "common": common_bootstrap_payload(),
+        }
+        return self.render_app_template(extra_bootstrap_data=payload)
+
     @has_access
     @event_logger.log_this
     @expose("/sqllab/history/", methods=("GET",))
