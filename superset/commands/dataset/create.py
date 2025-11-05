@@ -47,6 +47,95 @@ class CreateDatasetCommand(CreateMixin, BaseCommand):
     def run(self) -> Model:
         self.validate()
 
+        database = self._properties.get("database")
+        table_name = self._properties.get("table_name")
+        sql = self._properties.get("sql")
+
+        # Auto-convert DHIS2 datasets to virtual to preserve query parameters
+        if database and database.backend == "dhis2":
+            import re
+            import json
+            from urllib.parse import unquote
+
+            # Case 1: SQL provided (from SQL Lab or with DHIS2 comment)
+            if sql:
+                # Extract DHIS2 parameters from SQL comment if present
+                dhis2_params = None
+                block_match = re.search(r'/\*\s*DHIS2:\s*(.+?)\s*\*/', sql, re.IGNORECASE | re.DOTALL)
+                if block_match:
+                    dhis2_params = block_match.group(1).strip()
+                    dhis2_params = unquote(dhis2_params)
+                else:
+                    line_match = re.search(r'--\s*DHIS2:\s*(.+)', sql, re.IGNORECASE)
+                    if line_match:
+                        dhis2_params = line_match.group(1).strip()
+                        dhis2_params = unquote(dhis2_params)
+
+                if dhis2_params:
+                    # Convert to virtual dataset
+                    self._properties["is_sqllab_view"] = True
+
+                    # Extract DHIS2 table name from SQL
+                    from_match = re.search(r'FROM\s+(\w+)', sql, re.IGNORECASE)
+                    dhis2_table = from_match.group(1) if from_match else table_name
+
+                    # Store parameters in extra field for persistence across requests
+                    existing_extra = self._properties.get("extra") or "{}"
+                    try:
+                        extra_dict = json.loads(existing_extra) if isinstance(existing_extra, str) else existing_extra
+                    except json.JSONDecodeError:
+                        extra_dict = {}
+
+                    # Store parameters keyed by DHIS2 table name
+                    if "dhis2_params" not in extra_dict:
+                        extra_dict["dhis2_params"] = {}
+                    extra_dict["dhis2_params"][dhis2_table] = dhis2_params
+
+                    self._properties["extra"] = json.dumps(extra_dict)
+                    logger.info(f"[DHIS2] Converting to virtual dataset with SQL: {sql[:200]}...")
+                    logger.info(f"[DHIS2] Stored DHIS2 params in extra field for table: {dhis2_table}")
+                    logger.info(f"[DHIS2] Parameters: {dhis2_params[:100]}")
+                else:
+                    # SQL provided but no DHIS2 comment - keep as-is
+                    logger.info(f"[DHIS2] SQL provided without DHIS2 comment: {sql[:200]}")
+
+            # Case 2: No SQL (from Query Builder physical dataset creation)
+            # For DHIS2, we need to generate SQL from table_name to preserve it
+            else:
+                # Generate basic SQL with table name
+                # The DHIS2 comment should be added by the frontend or API
+                generated_sql = f"SELECT * FROM {table_name}"
+
+                # Check if there are any default parameters in database config
+                try:
+                    extra = json.loads(database.extra) if database.extra else {}
+                    default_params = extra.get("default_params", {})
+                    endpoint_params = extra.get("endpoint_params", {})
+
+                    # Build DHIS2 comment from database defaults if available
+                    dhis2_comment_parts = []
+
+                    # Add endpoint-specific params first
+                    if table_name in endpoint_params:
+                        for key, value in endpoint_params[table_name].items():
+                            dhis2_comment_parts.append(f"{key}={value}")
+
+                    # Add default params
+                    for key, value in default_params.items():
+                        dhis2_comment_parts.append(f"{key}={value}")
+
+                    if dhis2_comment_parts:
+                        dhis2_comment = "&".join(dhis2_comment_parts)
+                        generated_sql = f"{generated_sql}\n/* DHIS2: {dhis2_comment} */"
+                        logger.info(f"[DHIS2] Generated SQL with database defaults: {generated_sql[:200]}")
+                except Exception as e:
+                    logger.warning(f"[DHIS2] Could not load database defaults: {e}")
+
+                # Convert to virtual dataset with generated SQL
+                self._properties["sql"] = generated_sql
+                self._properties["is_sqllab_view"] = True
+                logger.info(f"[DHIS2] Auto-converted Query Builder dataset to virtual with SQL: {generated_sql[:200]}")
+
         dataset = DatasetDAO.create(attributes=self._properties)
         dataset.fetch_metadata()
         return dataset

@@ -29,6 +29,7 @@ import {
 } from 'src/features/datasets/AddDataset/types';
 import { Table } from 'src/hooks/apiResources';
 import { Typography } from '@superset-ui/core/components/Typography';
+import DHIS2ParameterBuilder from '../DHIS2ParameterBuilder';
 
 interface LeftPanelProps {
   setDataset: Dispatch<SetStateAction<object>>;
@@ -199,6 +200,9 @@ export default function LeftPanel({
     />
   );
 
+  const isDHIS2Database = dataset?.db?.backend === 'dhis2';
+  const showDHIS2QueryBuilder = isDHIS2Database && dataset?.table_name;
+
   return (
     <LeftPanelStyle>
       <TableSelector
@@ -214,6 +218,29 @@ export default function LeftPanel({
         {...(dataset?.catalog && { catalog: dataset.catalog })}
         {...(dataset?.schema && { schema: dataset.schema })}
       />
+
+      {showDHIS2QueryBuilder && (
+        <div style={{ marginTop: 20 }}>
+          <DHIS2ParameterBuilder
+            databaseId={dataset.db?.id}
+            endpoint={dataset.table_name}
+            onParametersChange={(parameters) => {
+              console.log('DHIS2 Parameters generated:', parameters);
+              setDataset({
+                type: DatasetActionType.SetDHIS2Parameters,
+                payload: { parameters },
+              });
+            }}
+            onColumnsChange={(columns) => {
+              console.log('DHIS2 Columns generated:', columns);
+              setDataset({
+                type: DatasetActionType.SetDHIS2Columns,
+                payload: { columns },
+              });
+            }}
+          />
+        </div>
+      )}
     </LeftPanelStyle>
   );
 }

@@ -24,6 +24,8 @@ export enum DatasetActionType {
   SelectSchema,
   SelectTable,
   ChangeDataset,
+  SetDHIS2Parameters,
+  SetDHIS2Columns,
 }
 
 export interface DatasetObject {
@@ -33,6 +35,8 @@ export interface DatasetObject {
   dataset_name: string;
   table_name?: string | null;
   explore_url?: string;
+  dhis2_parameters?: Record<string, string>;
+  dhis2_columns?: Array<{ name: string; type: string }>;
 }
 
 export interface DatasetReducerPayloadType {
@@ -56,4 +60,12 @@ export type DSReducerActionType =
         | DatasetActionType.SelectSchema
         | DatasetActionType.SelectTable;
       payload: DatasetReducerPayloadType;
+    }
+  | {
+      type: DatasetActionType.SetDHIS2Parameters;
+      payload: { parameters: Record<string, string> };
+    }
+  | {
+      type: DatasetActionType.SetDHIS2Columns;
+      payload: { columns: Array<{ name: string; type: string }> };
     };

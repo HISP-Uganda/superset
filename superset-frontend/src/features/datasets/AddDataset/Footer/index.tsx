@@ -94,12 +94,24 @@ function Footer({
 
   const onSave = (createChart: boolean = true) => {
     if (datasetObject) {
-      const data = {
+      const data: any = {
         database: datasetObject.db?.id,
         catalog: datasetObject.catalog,
         schema: datasetObject.schema,
         table_name: datasetObject.table_name,
       };
+
+      // Include DHIS2 parameters in SQL if present
+      if (datasetObject.dhis2_parameters) {
+        // Embed parameters in SQL as block comment for the dialect to read
+        // Use & separator and /* */ format as expected by dhis2_dialect.py
+        const paramsStr = Object.entries(datasetObject.dhis2_parameters)
+          .map(([key, value]) => `${key}=${value}`)
+          .join('&');
+        data.sql = `SELECT * FROM ${datasetObject.table_name}\n/* DHIS2: ${paramsStr} */`;
+        console.log('[DHIS2] Creating dataset with SQL:', data.sql);
+      }
+
       createResource(data).then(response => {
         if (!response) {
           return;

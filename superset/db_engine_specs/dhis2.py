@@ -418,81 +418,20 @@ class DHIS2EngineSpec(BaseEngineSpec):
         cls, database: Database, inspector, schema: Optional[str]
     ) -> set[str]:
         """
-        Dynamically discover available DHIS2 datasets and API endpoints
-        Fetches actual dataSets from DHIS2 API plus common endpoints
+        Return ONLY data query endpoints for DHIS2
+        Excludes metadata endpoints (used by Query Builder) and configuration endpoints
 
-        Note: This is called during connection test, so we return a static
-        list to avoid unnecessary API calls. Full discovery happens when
-        creating datasets.
+        Note: This is called during connection test and dataset creation.
+        Returns only the 5 core data query endpoints.
         """
-        table_names = set()
-
-        # Add standard DHIS2 API endpoints (always available)
-        table_names.update({
-            "analytics",
-            "dataValueSets",
-            "trackedEntityInstances",
-            "events",
-            "enrollments",
-            "dataElements",
-            "organisationUnits",
-            "indicators",
-            "programs",
-        })
-
-        # Try to fetch dataSets from DHIS2 API (only if not in test mode)
-        # This is expensive, so we skip it during connection test
-        try:
-            # Check if we're in a test connection scenario
-            # by seeing if inspector is available
-            if inspector is not None:
-                parsed = cls.parse_uri(database.sqlalchemy_uri_decrypted)
-                base_url = f"https://{parsed['host']}{parsed['path']}"
-
-                username = parsed.get("username", "")
-                password = parsed.get("password", "")
-
-                # Determine auth
-                if not username and password:
-                    auth = None
-                    headers = {"Authorization": f"ApiToken {password}"}
-                else:
-                    auth = (username, password)
-                    headers = {}
-
-                # Fetch dataSets from DHIS2
-                response = requests.get(
-                    f"{base_url}/dataSets",
-                    params={"fields": "id,displayName", "paging": "false"},
-                    auth=auth,
-                    headers=headers,
-                    timeout=10,
-                )
-
-                if response.status_code == 200:
-                    data = response.json()
-                    datasets = data.get("dataSets", [])
-
-                    # Add datasets as tables (using displayName for readability)
-                    for ds in datasets:
-                        # Use format: dataset_<id> or just the displayName (cleaned)
-                        name = ds.get("displayName", ds.get("id", "")).replace(" ", "_").lower()
-                        table_names.add(name)
-
-                    logger.info(f"Discovered {len(datasets)} DHIS2 dataSets")
-        except Exception as e:
-            logger.debug(f"Could not fetch DHIS2 dataSets (may be in test mode): {e}")
-
-        # Also check for user-configured endpoints
-        try:
-            extra = database.extra_json
-            endpoint_params = extra.get("endpoint_params", {})
-            if endpoint_params:
-                table_names.update(endpoint_params.keys())
-        except Exception as e:
-            logger.debug(f"No custom endpoint_params: {e}")
-
-        return table_names
+        # Return ONLY data query endpoints (same as dialect)
+        return {
+            "analytics",              # Aggregated analytical data (MOST COMMON)
+            "dataValueSets",          # Raw data entry values
+            "events",                 # Tracker program events
+            "trackedEntityInstances", # Tracked entities (people, assets)
+            "enrollments",            # Program enrollments
+        }
 
     @classmethod
     def get_extra_params(cls, database: Database, source=None) -> Dict[str, Any]:
@@ -510,7 +449,8 @@ class DHIS2EngineSpec(BaseEngineSpec):
 
         # Add DHIS2-specific parameters from database configuration
         try:
-            extra = database.extra_json
+            import json
+            extra = json.loads(database.extra) if database.extra else {}
             if "default_params" in extra:
                 extra_params["default_params"] = extra["default_params"]
             if "endpoint_params" in extra:

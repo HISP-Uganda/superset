@@ -178,6 +178,7 @@ class DatabaseRestApi(BaseSupersetModelRestApi):
         "upload",
         "oauth2",
         "sync_permissions",
+        "dhis2_metadata",
     }
 
     resource_name = "database"
@@ -2105,3 +2106,250 @@ class DatabaseRestApi(BaseSupersetModelRestApi):
             database, database.get_default_catalog(), schemas_allowed, True
         )
         return self.response(200, schemas=schemas_allowed_processed)
+
+    @expose("/<int:pk>/dhis2_metadata/", methods=["GET"])
+    @protect()
+    @safe
+    @statsd_metrics
+    @event_logger.log_this_with_context(
+        action=lambda self, *args, **kwargs: f"{self.__class__.__name__}"
+        f".dhis2_metadata",
+        log_to_statsd=False,
+    )
+    def dhis2_metadata(self, pk: int) -> Response:
+        """Fetch DHIS2 metadata (dataElements, indicators, orgUnits).
+        ---
+        get:
+          summary: Fetch DHIS2 metadata for visual query builder
+          parameters:
+          - in: path
+            name: pk
+            schema:
+              type: integer
+          - in: query
+            name: type
+            schema:
+              type: string
+              enum: [dataElements, indicators, organisationUnits, periods]
+          - in: query
+            name: table
+            schema:
+              type: string
+              description: DHIS2 table name to filter compatible data elements (e.g., analytics, events)
+          - in: query
+            name: periodType
+            schema:
+              type: string
+              enum: [YEARLY, QUARTERLY, MONTHLY, RELATIVE]
+              description: Type of periods to return (for type=periods only)
+          responses:
+            200:
+              description: DHIS2 metadata items
+              content:
+                application/json:
+                  schema:
+                    type: object
+                    properties:
+                      result:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            id:
+                              type: string
+                            displayName:
+                              type: string
+            400:
+              $ref: '#/components/responses/400'
+            401:
+              $ref: '#/components/responses/401'
+            404:
+              $ref: '#/components/responses/404'
+            500:
+              $ref: '#/components/responses/500'
+        """
+        import requests
+        import json
+        from sqlalchemy.engine.url import make_url
+
+        database = DatabaseDAO.find_by_id(pk)
+        if not database:
+            return self.response_404()
+
+        # Check if this is a DHIS2 database
+        if database.backend != "dhis2":
+            return self.response_400(message="Database is not a DHIS2 connection")
+
+        metadata_type = request.args.get("type", "dataElements")
+        level = request.args.get("level")  # Optional level filter for org units
+        period_type = request.args.get("periodType", "YEARLY")  # For periods
+        table_name = request.args.get("table")  # Optional table context for filtering
+
+        # Handle periods specially - generate fixed periods
+        if metadata_type == "periods":
+            return self._generate_fixed_periods(period_type)
+
+        try:
+            # Parse database URI to get connection details
+            uri = make_url(database.sqlalchemy_uri_decrypted)
+
+            # Build DHIS2 API URL
+            api_path = uri.database or "/api"
+            if not api_path.startswith("/"):
+                api_path = f"/{api_path}"
+
+            base_url = f"https://{uri.host}{api_path}"
+
+            # Determine auth method
+            if not uri.username and uri.password:
+                # PAT authentication
+                auth = None
+                headers = {"Authorization": f"ApiToken {uri.password}"}
+            else:
+                # Basic authentication
+                auth = (uri.username, uri.password) if uri.username else None
+                headers = {}
+
+            # Build request parameters with aggregationType and valueType for filtering
+            if metadata_type in ["dataElements", "indicators"]:
+                params = {
+                    "fields": "id,displayName,aggregationType,valueType,domainType",
+                    "paging": "false",
+                }
+
+                # Table-specific filtering based on DHIS2 endpoint requirements
+                filters = []
+
+                if table_name == "analytics":
+                    # Analytics requires aggregatable numeric data
+                    # Filter out TEXT types and non-aggregatable items
+                    if metadata_type == "dataElements":
+                        filters.append("aggregationType:!eq:NONE")  # Must be aggregatable
+                        filters.append("valueType:in:[NUMBER,INTEGER,PERCENTAGE,UNIT_INTERVAL]")  # Must be numeric
+                    # Indicators are always aggregatable, no filter needed
+
+                elif table_name == "events":
+                    # Events require tracker domain data elements
+                    if metadata_type == "dataElements":
+                        filters.append("domainType:eq:TRACKER")
+                    # Events typically don't use indicators
+
+                elif table_name == "trackedEntityInstances":
+                    # Tracked entities use attributes, not data elements
+                    # This should fetch from /trackedEntityAttributes endpoint instead
+                    # For now, return empty to avoid confusion
+                    pass
+
+                # dataValueSets accepts any data element - no filtering needed
+
+                if filters:
+                    params["filter"] = filters
+            else:
+                params = {
+                    "fields": "id,displayName,level,parent",
+                    "paging": "false",
+                }
+
+            # Add level filter for organization units if specified
+            if metadata_type == "organisationUnits" and level:
+                params["filter"] = f"level:eq:{level}"
+
+            # Fetch metadata from DHIS2
+            response = requests.get(
+                f"{base_url}/{metadata_type}",
+                params=params,
+                auth=auth,
+                headers=headers,
+                timeout=30,
+            )
+
+            if response.status_code == 200:
+                data = response.json()
+                items = data.get(metadata_type, [])
+
+                # For org units, sort by level and then by name
+                if metadata_type == "organisationUnits":
+                    items = sorted(items, key=lambda x: (x.get("level", 999), x.get("displayName", "")))
+
+                # For data elements, add type information for grouping
+                if metadata_type == "dataElements" and table_name == "analytics":
+                    for item in items:
+                        # Add category for UI grouping
+                        agg_type = item.get("aggregationType", "NONE")
+                        value_type = item.get("valueType", "TEXT")
+                        item["category"] = "Aggregatable Data Elements"
+                        item["typeInfo"] = f"{value_type} ({agg_type})"
+
+                # Return limited results for performance
+                return self.response(200, result=items[:1000])
+            else:
+                return self.response_400(
+                    message=f"DHIS2 API error: {response.status_code} {response.text[:200]}"
+                )
+
+        except Exception as ex:
+            logger.exception("Failed to fetch DHIS2 metadata")
+            return self.response_500(message=str(ex))
+
+    def _generate_fixed_periods(self, period_type: str) -> Response:
+        """Generate fixed periods (years, quarters, months) or relative periods.
+
+        Args:
+            period_type: Type of periods - YEARLY, QUARTERLY, MONTHLY, or RELATIVE
+
+        Returns:
+            Response with list of period objects
+        """
+        current_year = datetime.now().year
+        periods = []
+
+        if period_type == "YEARLY":
+            # Generate last 10 years
+            for year in range(current_year - 9, current_year + 1):
+                periods.append({
+                    "id": str(year),
+                    "displayName": str(year),
+                    "type": "YEARLY"
+                })
+
+        elif period_type == "QUARTERLY":
+            # Generate quarters for last 3 years
+            for year in range(current_year - 2, current_year + 1):
+                for quarter in range(1, 5):
+                    quarter_id = f"{year}Q{quarter}"
+                    periods.append({
+                        "id": quarter_id,
+                        "displayName": f"Q{quarter} {year}",
+                        "type": "QUARTERLY"
+                    })
+
+        elif period_type == "MONTHLY":
+            # Generate months for last 2 years
+            month_names = [
+                "January", "February", "March", "April", "May", "June",
+                "July", "August", "September", "October", "November", "December"
+            ]
+            for year in range(current_year - 1, current_year + 1):
+                for month in range(1, 13):
+                    month_id = f"{year}{month:02d}"
+                    periods.append({
+                        "id": month_id,
+                        "displayName": f"{month_names[month-1]} {year}",
+                        "type": "MONTHLY"
+                    })
+
+        elif period_type == "RELATIVE":
+            # Relative periods (kept for convenience)
+            periods = [
+                {"id": "LAST_YEAR", "displayName": "Last Year", "type": "RELATIVE"},
+                {"id": "THIS_YEAR", "displayName": "This Year", "type": "RELATIVE"},
+                {"id": "LAST_QUARTER", "displayName": "Last Quarter", "type": "RELATIVE"},
+                {"id": "THIS_QUARTER", "displayName": "This Quarter", "type": "RELATIVE"},
+                {"id": "LAST_MONTH", "displayName": "Last Month", "type": "RELATIVE"},
+                {"id": "THIS_MONTH", "displayName": "This Month", "type": "RELATIVE"},
+                {"id": "LAST_12_MONTHS", "displayName": "Last 12 Months", "type": "RELATIVE"},
+                {"id": "LAST_6_MONTHS", "displayName": "Last 6 Months", "type": "RELATIVE"},
+                {"id": "LAST_3_MONTHS", "displayName": "Last 3 Months", "type": "RELATIVE"},
+            ]
+
+        return self.response(200, result=periods)

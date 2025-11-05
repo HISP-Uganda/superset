@@ -58,6 +58,10 @@ export interface IDatasetPanelWrapperProps {
   schema?: string | null;
   setHasColumns?: Function;
   datasets?: DatasetObject[] | undefined;
+  /**
+   * DHIS2 generated columns (for preview)
+   */
+  dhis2Columns?: Array<{ name: string; type: string }>;
 }
 
 const DatasetPanelWrapper = ({
@@ -67,6 +71,7 @@ const DatasetPanelWrapper = ({
   schema,
   setHasColumns,
   datasets,
+  dhis2Columns,
 }: IDatasetPanelWrapperProps) => {
   const [columnList, setColumnList] = useState<ITableColumn[]>([]);
   const [loading, setLoading] = useState(false);
@@ -126,12 +131,24 @@ const DatasetPanelWrapper = ({
 
   useEffect(() => {
     tableNameRef.current = tableName;
+
+    // If DHIS2 columns are provided, use them directly
+    if (dhis2Columns && dhis2Columns.length > 0) {
+      console.log('Using DHIS2 generated columns:', dhis2Columns);
+      setColumnList(dhis2Columns);
+      setHasColumns?.(true);
+      setHasError(false);
+      setLoading(false);
+      return;
+    }
+
+    // Otherwise fetch from API
     if (tableName && schema && dbId) {
       getTableMetadata({ tableName, dbId, schema });
     }
     // getTableMetadata is a const and should not be in dependency array
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tableName, dbId, schema]);
+  }, [tableName, dbId, schema, dhis2Columns]);
 
   return (
     <DatasetPanel

@@ -1426,6 +1426,65 @@ class SqlaTable(
         self,
         template_processor: BaseTemplateProcessor | None = None,
     ) -> tuple[TableClause | Alias, str | None]:
+        import logging
+        from sqlalchemy import text as sa_text
+        from sqlalchemy.sql.expression import TextAsFrom
+
+        logger = logging.getLogger(__name__)
+
+        # Special handling for DHIS2 virtual datasets to preserve SQL comments
+        if self.database and self.database.backend == "dhis2" and self.is_virtual and self.sql:
+            import re
+            from urllib.parse import unquote
+            from flask import g, current_app
+            import json
+
+            logger.info(f"[DHIS2] get_from_clause for virtual dataset {self.id}: {self.table_name}")
+            logger.info(f"[DHIS2] Full SQL stored: {self.sql}")
+
+            # Extract DHIS2 table name from SQL (e.g., analytics, not dataset name)
+            from_match = re.search(r'FROM\s+(\w+)', self.sql, re.IGNORECASE)
+            dhis2_table = from_match.group(1) if from_match else self.table_name
+
+            # Check extra field first for stored parameters
+            dhis2_params = None
+            try:
+                extra_dict = json.loads(self.extra) if self.extra else {}
+                if "dhis2_params" in extra_dict and dhis2_table in extra_dict["dhis2_params"]:
+                    dhis2_params = extra_dict["dhis2_params"][dhis2_table]
+                    logger.info(f"[DHIS2] Loaded params from extra field: {dhis2_params[:150]}")
+            except (json.JSONDecodeError, KeyError, TypeError) as e:
+                logger.warning(f"[DHIS2] Could not load params from extra field: {e}")
+
+            # Fallback to extracting from SQL comment if not in extra field
+            if not dhis2_params:
+                block_match = re.search(r'/\*\s*DHIS2:\s*(.+?)\s*\*/', self.sql, re.IGNORECASE | re.DOTALL)
+                if block_match:
+                    dhis2_params = block_match.group(1).strip()
+                    dhis2_params = unquote(dhis2_params)
+                    logger.info(f"[DHIS2] Extracted parameters from SQL comment: {dhis2_params[:150]}")
+
+            if dhis2_params:
+                # Store in application cache with dataset ID as key (persists across requests)
+                cache_key = f"dhis2_params_{self.id}_{dhis2_table}"
+                try:
+                    from superset.extensions import cache_manager
+                    # Cache for 1 hour (parameters shouldn't change frequently)
+                    cache_manager.data_cache.set(cache_key, dhis2_params, timeout=3600)
+                    logger.info(f"[DHIS2] Cached params with key: {cache_key}")
+                except Exception as e:
+                    logger.warning(f"[DHIS2] Could not cache params: {e}")
+
+                # Also store in Flask g for same-request access
+                if not hasattr(g, 'dhis2_dataset_params'):
+                    g.dhis2_dataset_params = {}
+                g.dhis2_dataset_params[dhis2_table] = dhis2_params
+                logger.info(f"[DHIS2] Stored params in Flask g for DHIS2 table: {dhis2_table}")
+
+            # Use parent's implementation to create from_clause
+            # (Parameters are now in cache and Flask g, not in SQL comment)
+            return super().get_from_clause(template_processor)
+
         if not self.is_virtual:
             return self.get_sqla_table(), None
 

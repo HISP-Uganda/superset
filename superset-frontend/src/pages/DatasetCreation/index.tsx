@@ -75,6 +75,16 @@ export function datasetReducer(
         ...trimmedState,
         [action.payload.name]: action.payload.value,
       };
+    case DatasetActionType.SetDHIS2Parameters:
+      return {
+        ...trimmedState,
+        dhis2_parameters: action.payload.parameters,
+      };
+    case DatasetActionType.SetDHIS2Columns:
+      return {
+        ...trimmedState,
+        dhis2_columns: action.payload.columns,
+      };
     default:
       return null;
   }
@@ -124,6 +134,7 @@ export default function AddDataset() {
       schema={dataset?.schema}
       setHasColumns={setHasColumns}
       datasets={datasets}
+      dhis2Columns={dataset?.dhis2_columns}
     />
   );
 
