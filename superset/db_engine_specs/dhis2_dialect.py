@@ -328,18 +328,95 @@ class DHIS2ResponseNormalizer:
     """
 
     @staticmethod
-    def normalize_analytics(data: dict) -> tuple[list[str], list[tuple]]:
+    def extract_source_table_from_sql(sql: str) -> str | None:
         """
-        Normalize analytics endpoint response into PIVOTED/WIDE format
+        Extract the DHIS2 source table from SQL comment or table name pattern
 
-        Handles two response formats:
-        1. Full dimensions (dx, pe, ou, value) - returned when using dimension parameters
-        2. Partial dimensions (dx, value) - returned when using startDate/endDate filters
+        Supports:
+        1. SQL comment format: /* DHIS2: table=analytics&... */
+        2. Table name pattern: analytics_version2 -> analytics
 
-        Transforms from long format to wide format:
-          Period, OrgUnit, DataElement_A, DataElement_B, DataElement_C
-          202501, Adiland, 2, 5, 6
-          202509, Gulu, 4, 4, 5
+        Args:
+            sql: SQL query string
+
+        Returns:
+            Source table name (e.g., "analytics") or None
+        """
+        # First try to extract from SQL comment
+        table_match = re.search(r'/\*\s*DHIS2:.*table=([^&\s]+)', sql, re.IGNORECASE)
+        if table_match:
+            return table_match.group(1).strip()
+
+        # Fallback: Parse from table name in FROM clause
+        from_match = re.search(r'FROM\s+(\w+)', sql, re.IGNORECASE)
+        if from_match:
+            table_name = from_match.group(1)
+            # If it contains underscore, take first part (e.g., analytics_version2 -> analytics)
+            if '_' in table_name:
+                return table_name.split('_')[0]
+            return table_name
+
+        return None
+
+    @staticmethod
+    def _normalize_analytics_long_format(headers: list, rows_data: list, get_name_func) -> tuple[list[str], list[tuple]]:
+        """
+        Return analytics data in LONG/UNPIVOTED format
+
+        Format: Period, OrgUnit, DataElement, Value
+
+        This format prevents string concatenation issues when Pandas does aggregation.
+        Each row represents one data point.
+        """
+        # Find column indices
+        col_map = {}
+        for idx, h in enumerate(headers):
+            col_map[h.get("name", h.get("column"))] = idx
+
+        dx_idx = col_map.get("dx")
+        pe_idx = col_map.get("pe")
+        ou_idx = col_map.get("ou")
+        value_idx = col_map.get("value")
+
+        # Column names for long format
+        col_names = ["Period", "OrgUnit", "DataElement", "Value"]
+
+        # Build rows in long format
+        long_rows = []
+        for row in rows_data:
+            pe_name = get_name_func(row[pe_idx]) if pe_idx is not None else None
+            ou_name = get_name_func(row[ou_idx]) if ou_idx is not None else None
+            dx_name = get_name_func(row[dx_idx]) if dx_idx is not None else None
+            value = row[value_idx] if value_idx is not None else None
+
+            # Convert value to appropriate type
+            if value is not None:
+                try:
+                    value = float(value)
+                    if value.is_integer():
+                        value = int(value)
+                except (ValueError, AttributeError):
+                    pass  # Keep as string
+
+            long_rows.append((pe_name, ou_name, dx_name, value))
+
+        logger.info(f"Returned LONG format: {len(long_rows)} rows (Period, OrgUnit, DataElement, Value)")
+        return col_names, long_rows
+
+    @staticmethod
+    def normalize_analytics(data: dict, pivot: bool = True) -> tuple[list[str], list[tuple]]:
+        """
+        Normalize analytics endpoint response
+
+        Args:
+            data: DHIS2 analytics API response
+            pivot: If True, return WIDE format (pivoted). If False, return LONG format (unpivoted)
+
+        Formats:
+        - WIDE (pivoted): Period, OrgUnit, DataElement_A, DataElement_B, ...
+          Used for browsing data
+        - LONG (unpivoted): Period, OrgUnit, DataElement, Value
+          Used for aggregation/grouping operations
 
         Returns:
             Tuple of (column_names, rows)
@@ -358,6 +435,10 @@ class DHIS2ResponseNormalizer:
             """Get human-readable name for UID"""
             item = items.get(uid, {})
             return item.get("name", uid)
+
+        # If not pivoting, return long format immediately
+        if not pivot:
+            return DHIS2ResponseNormalizer._normalize_analytics_long_format(headers, rows_data, get_name)
 
         # Find column indices - handle missing dimensions
         col_map = {}
@@ -454,10 +535,21 @@ class DHIS2ResponseNormalizer:
         # Build rows
         pivoted_rows = []
         for (pe, ou) in sorted(pivot_data.keys()):
-            row = [get_name(pe), get_name(ou)]
+            pe_name = get_name(pe)
+            ou_name = get_name(ou)
+
+            # Debug logging to identify concatenation
+            if logger.isEnabledFor(logging.DEBUG):
+                logger.debug(f"Pivoting row - PE UID: {pe}, PE name: {pe_name}, OU UID: {ou}, OU name: {ou_name}")
+
+            row = [pe_name, ou_name]
             for de in data_element_list:
                 row.append(pivot_data[(pe, ou)].get(de, None))
             pivoted_rows.append(tuple(row))
+
+        # Log first few rows for debugging
+        if pivoted_rows and logger.isEnabledFor(logging.INFO):
+            logger.info(f"First pivoted row - Period: '{pivoted_rows[0][0]}', OrgUnit: '{pivoted_rows[0][1]}'")
 
         return col_names, pivoted_rows
 
@@ -636,19 +728,20 @@ class DHIS2ResponseNormalizer:
         return ["data"], [(json.dumps(data),)]
 
     @classmethod
-    def normalize(cls, endpoint: str, data: dict) -> tuple[list[str], list[tuple]]:
+    def normalize(cls, endpoint: str, data: dict, pivot: bool = True) -> tuple[list[str], list[tuple]]:
         """
         Normalize DHIS2 API response based on endpoint type
 
         Args:
             endpoint: DHIS2 API endpoint name
             data: Raw JSON response from DHIS2
+            pivot: Whether to pivot analytics data (wide format) or keep long format
 
         Returns:
             Tuple of (column_names, rows)
         """
         if endpoint == "analytics":
-            return cls.normalize_analytics(data)
+            return cls.normalize_analytics(data, pivot=pivot)
         elif endpoint == "dataValueSets":
             return cls.normalize_data_value_sets(data)
         elif endpoint == "events":
@@ -737,33 +830,68 @@ class DHIS2Dialect(default.DefaultDialect):
         """
         Return column information dynamically from stored metadata or DHIS2 API
         For datasets, fetches actual dataElements from the dataset
+
+        For custom named datasets (e.g., "analytics_version2"), extracts the source table
+        and returns appropriate columns based on it.
         """
+        # Parse source table from custom dataset name
+        # Example: "analytics_version2" -> "analytics"
+        source_table = table_name
+        if '_' in table_name:
+            parsed = table_name.split('_')[0]
+            logger.debug(f"Parsed source table '{parsed}' from dataset name '{table_name}'")
+            source_table = parsed
+
         # Try to get custom columns from connection metadata
         try:
             if hasattr(connection, 'info') and 'endpoint_columns' in connection.info:
                 endpoint_columns = connection.info['endpoint_columns']
-                if table_name in endpoint_columns:
-                    return [
-                        {"name": col, "type": types.String(), "nullable": True}
-                        for col in endpoint_columns[table_name]
-                    ]
+                # Check both original table_name and source_table
+                for name in [table_name, source_table]:
+                    if name in endpoint_columns:
+                        return [
+                            {"name": col, "type": types.String(), "nullable": True}
+                            for col in endpoint_columns[name]
+                        ]
         except Exception as e:
             logger.debug(f"Could not load custom columns: {e}")
 
         # Default columns for common DHIS2 endpoints
+        # Note: analytics endpoint returns pivoted format with Period, OrgUnit, DataElement1, DataElement2, ...
         default_columns = {
-            "analytics": ["dx", "pe", "ou", "value"],
+            "analytics": ["Period", "OrgUnit"],  # Pivoted format column names
             "dataValueSets": ["dataElement", "period", "orgUnit", "value", "storedBy", "created"],
             "trackedEntityInstances": ["trackedEntityInstance", "orgUnit", "trackedEntityType", "attributes"],
             "events": ["event", "program", "orgUnit", "eventDate", "dataValues"],
             "enrollments": ["enrollment", "trackedEntityInstance", "program", "orgUnit", "enrollmentDate"],
         }
 
-        if table_name in default_columns:
-            return [
-                {"name": col, "type": types.String(), "nullable": True}
-                for col in default_columns[table_name]
-            ]
+        # Use source_table (not table_name) for lookup
+        if source_table in default_columns:
+            columns = []
+            for col in default_columns[source_table]:
+                # Explicitly mark Period and OrgUnit as String to prevent numeric conversion
+                col_def = {
+                    "name": col,
+                    "type": types.String(),
+                    "nullable": True,
+                    "is_dttm": False,  # Not a datetime column
+                }
+                # Add extra metadata for categorical/groupable columns
+                if col in ["Period", "OrgUnit", "period", "orgUnit"]:
+                    col_def["groupby"] = True  # Can be used for grouping
+                    col_def["filterable"] = True  # Can be filtered
+                    col_def["verbose_name"] = col  # Display name
+                    col_def["is_numeric"] = False  # Explicitly NOT numeric - prevents aggregation
+                    col_def["python_date_format"] = None  # Not a date
+                else:
+                    # Data element columns are numeric and can be aggregated
+                    col_def["is_numeric"] = True
+                    col_def["filterable"] = True
+                columns.append(col_def)
+
+                logger.debug(f"Column '{col}': type={col_def['type']}, groupby={col_def.get('groupby')}, is_numeric={col_def.get('is_numeric')}")
+            return columns
 
         # For dataset tables, try to fetch actual dataElements from DHIS2
         # Dataset table names are typically cleaned display names
@@ -1126,10 +1254,15 @@ class DHIS2Cursor:
 
         return merged
 
-    def _make_api_request(self, endpoint: str, params: dict[str, str]) -> list[dict]:
+    def _make_api_request(self, endpoint: str, params: dict[str, str], query: str = "") -> list[dict]:
         """
         Execute DHIS2 API request with given parameters
         Returns list of result rows
+
+        Args:
+            endpoint: DHIS2 endpoint name
+            params: Query parameters
+            query: Original SQL query (for pivot detection)
         """
         url = f"{self.connection.base_url}/{endpoint}"
 
@@ -1179,8 +1312,8 @@ class DHIS2Cursor:
 
             data = response.json()
 
-            # Parse response based on endpoint structure
-            rows = self._parse_response(endpoint, data)
+            # Parse response based on endpoint structure - pass query for pivot detection
+            rows = self._parse_response(endpoint, data, query)
 
             logger.info(f"DHIS2 API returned {len(rows)} rows")
             return rows
@@ -1195,16 +1328,35 @@ class DHIS2Cursor:
             logger.error(f"DHIS2 API request failed: {e}")
             raise DHIS2DBAPI.OperationalError(f"API request failed: {e}")
 
-    def _parse_response(self, endpoint: str, data: dict) -> list[tuple]:
+    def _parse_response(self, endpoint: str, data: dict, query: str = "") -> list[tuple]:
         """
         Parse DHIS2 API response using endpoint-aware normalizers
+
+        Args:
+            endpoint: DHIS2 endpoint name
+            data: JSON response from DHIS2 API
+            query: Original SQL query (for pivot detection)
         """
         print(f"[DHIS2] Parsing response for endpoint: {endpoint}")
         print(f"[DHIS2] Response keys: {list(data.keys())}")
         print(f"[DHIS2] Response sample: {str(data)[:500]}")
 
+        # Detect if query wants pivoted or unpivoted data
+        # SELECT * FROM analytics = wants pivoted (wide format) - typical for browsing data
+        # SELECT OrgUnit, metric FROM (SELECT * FROM analytics) = wants unpivoted (long format) - for aggregation
+        #
+        # Key insight: When Superset does GROUP BY operations, it uses a subquery pattern like:
+        # SELECT cols FROM (SELECT * FROM analytics) AS virtual_table GROUP BY cols
+        #
+        # If the outer query selects specific columns (not *), it means Superset will aggregate,
+        # so we should return unpivoted data to avoid string concatenation issues.
+        should_pivot = bool(re.search(r'SELECT\s+\*\s+FROM\s+' + re.escape(endpoint), query, re.IGNORECASE))
+
+        print(f"[DHIS2] Query analysis: {'Simple SELECT * (will pivot)' if should_pivot else 'Grouped/aggregated query (no pivot)'}")
+        logger.info(f"Pivot mode for {endpoint}: {should_pivot}")
+
         # Use the normalizer to parse response
-        col_names, rows = DHIS2ResponseNormalizer.normalize(endpoint, data)
+        col_names, rows = DHIS2ResponseNormalizer.normalize(endpoint, data, pivot=should_pivot)
 
         print(f"[DHIS2] Normalized columns: {col_names}")
         print(f"[DHIS2] Normalized row count: {len(rows)}")
@@ -1245,8 +1397,8 @@ class DHIS2Cursor:
         print(f"[DHIS2] Merged params: {api_params}")
         logger.info(f"Merged params: {api_params}")
 
-        # Execute API request
-        self._rows = self._make_api_request(endpoint, api_params)
+        # Execute API request - pass query for pivot detection
+        self._rows = self._make_api_request(endpoint, api_params, query)
         self.rowcount = len(self._rows)
         print(f"[DHIS2] Fetched {self.rowcount} rows")
 

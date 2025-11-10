@@ -31,6 +31,7 @@ import {
   setDatabases,
   addDangerToast,
   resetState,
+  queryEditorSetSql,
 } from 'src/SqlLab/actions/sqlLab';
 import { Button, EmptyState, Icons } from '@superset-ui/core/components';
 import { type DatabaseObject } from 'src/components';
@@ -44,6 +45,7 @@ import {
 } from 'src/utils/localStorageHelpers';
 import { noop } from 'lodash';
 import TableElement from '../TableElement';
+import DHIS2QueryBuilder from '../DHIS2QueryBuilder';
 
 export interface SqlEditorLeftBarProps {
   queryEditorId: string;
@@ -83,6 +85,7 @@ const SqlEditorLeftBar = ({
     'catalog',
     'schema',
     'tabViewId',
+    'sql',
   ]);
 
   const [_emptyResultsWithSearch, setEmptyResultsWithSearch] = useState(false);
@@ -206,6 +209,23 @@ const SqlEditorLeftBar = ({
     dispatch(resetState());
   }, [dispatch]);
 
+  const handleInsertDHIS2SQL = useCallback(
+    (sql: string) => {
+      // Get current SQL
+      const currentSql = queryEditor.sql || '';
+
+      // Insert SQL at the end or replace if empty
+      const newSql = currentSql.trim() ? `${currentSql}\n\n${sql}` : sql;
+
+      // Update the query editor
+      dispatch(queryEditorSetSql(queryEditor, newSql));
+    },
+    [dispatch, queryEditor],
+  );
+
+  // Check if current database is DHIS2
+  const isDHIS2Database = userSelectedDb?.backend === 'dhis2';
+
   return (
     <LeftBarStyles data-test="sql-editor-left-bar">
       <TableSelectorMultiple
@@ -224,6 +244,15 @@ const SqlEditorLeftBar = ({
         sqlLabMode
       />
       <div className="divider" />
+
+      {/* DHIS2 Query Builder - Show only for DHIS2 databases */}
+      {isDHIS2Database && (
+        <>
+          <DHIS2QueryBuilder onInsertSQL={handleInsertDHIS2SQL} />
+          <div className="divider" />
+        </>
+      )}
+
       <StyledScrollbarContainer>
         {tables.map(table => (
           <TableElement

@@ -16,7 +16,7 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { t, styled, SupersetClient } from '@superset-ui/core';
 import { Select, Typography, Space, Tag, Divider, Button, Modal, Table as AntTable, Input } from 'antd';
 import { PeriodSelector } from './PeriodSelector';
@@ -43,7 +43,9 @@ interface DHIS2ParameterBuilderProps {
   endpoint?: string | null;
   onParametersChange?: (parameters: Record<string, string>) => void;
   onColumnsChange?: (columns: Array<{ name: string; type: string }>) => void;
+  onDatasetNameChange?: (name: string) => void;
   initialParameters?: Record<string, string>;
+  initialDatasetName?: string;
 }
 
 const Container = styled.div`
@@ -85,6 +87,26 @@ const ORGUNIT_OPTIONS = [
 ];
 
 /**
+ * Extract the source table name from a dataset name
+ *
+ * Pattern: {source_table}_{custom_suffix}
+ * Examples:
+ *   "analytics_malaria_cases" -> "analytics"
+ *   "analytics_version2" -> "analytics"
+ *   "dataValueSets_monthly" -> "dataValueSets"
+ *
+ * @param datasetName - The full dataset name
+ * @returns The source table name (first part before underscore)
+ */
+export function parseSourceTable(datasetName: string | null | undefined): string | null {
+  if (!datasetName) return null;
+
+  // Split by underscore and take the first part
+  const parts = datasetName.split('_');
+  return parts[0] || null;
+}
+
+/**
  * DHIS2 Parameter Builder Component
  * Visual query builder for DHIS2 analytics endpoint
  * Allows users to select dx (data), pe (period), and ou (org units) without SQL
@@ -94,13 +116,17 @@ export default function DHIS2ParameterBuilder({
   endpoint,
   onParametersChange,
   onColumnsChange,
+  onDatasetNameChange,
   initialParameters = {},
+  initialDatasetName,
 }: DHIS2ParameterBuilderProps) {
   const [dataElements, setDataElements] = useState<DHIS2Dimension[]>([]);
   const [indicators, setIndicators] = useState<DHIS2Dimension[]>([]);
   const [orgUnits, setOrgUnits] = useState<DHIS2OrgUnit[]>([]);
   const [selectedOrgUnitLevel, setSelectedOrgUnitLevel] = useState<number | null>(1); // Default to level 1 (countries)
   const [loading, setLoading] = useState(false);
+  const [datasetName, setDatasetName] = useState<string>(initialDatasetName || '');
+  const [userEditedName, setUserEditedName] = useState(false); // Track if user manually edited the name
 
   // Selected values (use semicolons to split values within dimension)
   const [selectedData, setSelectedData] = useState<string[]>(
@@ -117,7 +143,7 @@ export default function DHIS2ParameterBuilder({
   const [previewVisible, setPreviewVisible] = useState(false);
   const [previewData, setPreviewData] = useState<any[]>([]);
   const [previewColumns, setPreviewColumns] = useState<any[]>([]);
-  const [generatedApiUrl, setGeneratedApiUrl] = useState<string>('');
+  const [generatedApiUrl, setGeneratedApiUrl] = useState<string>(''); // Human-readable decoded URL
 
   // Load metadata from DHIS2 when component mounts or level changes
   useEffect(() => {
@@ -125,6 +151,62 @@ export default function DHIS2ParameterBuilder({
       loadMetadata();
     }
   }, [databaseId, endpoint, selectedOrgUnitLevel]);
+
+  // Auto-generate suggested dataset name with pattern: {source_table}_{custom_suffix}
+  useEffect(() => {
+    // Only auto-generate if user hasn't manually edited and name is empty or default
+    if (!userEditedName && (!datasetName || datasetName === endpoint || datasetName === initialDatasetName)) {
+      const parts: string[] = [];
+
+      // Add first data element name if available (more descriptive)
+      if (selectedData.length > 0 && dataElements.length > 0) {
+        const firstDE = dataElements.find(de => de.id === selectedData[0]);
+        if (firstDE) {
+          // Clean name: remove special chars, limit length
+          const cleanName = firstDE.displayName
+            .replace(/[^a-zA-Z0-9\s]/g, '')
+            .replace(/\s+/g, '_')
+            .substring(0, 30);
+          parts.push(cleanName);
+        }
+      }
+
+      // Add period info
+      if (selectedPeriods.length > 0) {
+        parts.push(selectedPeriods[0].replace(/\s+/g, '_'));
+      }
+
+      // Generate name with pattern: {source_table}_{suffix}
+      // Example: analytics_malaria_cases_2024Q1
+      const suffix = parts.length > 0 ? parts.join('_') : 'dataset';
+      const timestamp = new Date().toISOString().slice(0, 10).replace(/-/g, ''); // YYYYMMDD
+      const suggested = `${endpoint}_${suffix}_${timestamp}`;
+
+      if (suggested !== datasetName) {
+        setDatasetName(suggested);
+      }
+    }
+  }, [selectedData, selectedPeriods, dataElements, endpoint]);
+
+  // Notify parent when dataset name changes (debounced to avoid infinite loops)
+  const onDatasetNameChangeRef = useRef(onDatasetNameChange);
+  const endpointRef = useRef(endpoint);
+
+  useEffect(() => {
+    onDatasetNameChangeRef.current = onDatasetNameChange;
+    endpointRef.current = endpoint;
+  });
+
+  useEffect(() => {
+    if (onDatasetNameChangeRef.current && datasetName && datasetName !== endpointRef.current) {
+      const timeoutId = setTimeout(() => {
+        onDatasetNameChangeRef.current?.(datasetName);
+      }, 300); // Debounce 300ms
+
+      return () => clearTimeout(timeoutId);
+    }
+    return undefined; // Return undefined when condition is false
+  }, [datasetName]);
 
   // Update parent when selections change
   useEffect(() => {
@@ -182,6 +264,8 @@ export default function DHIS2ParameterBuilder({
       // Generate columns dynamically based on selected endpoint
       // For analytics-type endpoints with dimensional data, generate pivoted columns
       if (endpoint === 'analytics' && selectedData.length > 0) {
+        console.log('[DHIS2 Columns] Generating analytics columns - selectedData:', selectedData.length, 'dataElements:', dataElements.length);
+
         // Always include Period and OrgUnit columns
         columns.push({ name: 'Period', type: 'VARCHAR(255)' });
         columns.push({ name: 'OrgUnit', type: 'VARCHAR(255)' });
@@ -192,6 +276,7 @@ export default function DHIS2ParameterBuilder({
           const dimension = allDataDimensions.find(d => d.id === dataId);
           const columnName = dimension?.displayName || dataId;
           columns.push({ name: columnName, type: 'FLOAT' });
+          console.log('[DHIS2 Columns] Added column:', columnName, 'for ID:', dataId);
         });
       } else if (endpoint === 'dataValueSets') {
         // dataValueSets returns unpivoted data
@@ -340,6 +425,25 @@ export default function DHIS2ParameterBuilder({
           {t('Build your DHIS2 query visually by selecting data elements, periods, and organization units. No SQL required!')}
         </Paragraph>
       </InfoBox>
+
+      {/* Dataset Name Input */}
+      <ParameterSection>
+        <Title level={5}>{t('Dataset Name')}</Title>
+        <Paragraph type="secondary">
+          {t('Customize the name for this dataset (auto-generated based on your selections)')}
+        </Paragraph>
+        <Input
+          value={datasetName}
+          onChange={(e) => {
+            setDatasetName(e.target.value);
+            setUserEditedName(true); // Mark as user-edited to stop auto-generation
+          }}
+          placeholder={t('Enter dataset name...')}
+          style={{ width: '100%' }}
+        />
+      </ParameterSection>
+
+      <Divider />
 
       {/* Visual Query Builder */}
 
@@ -555,12 +659,27 @@ export default function DHIS2ParameterBuilder({
 
               setLoading(true);
               try {
-                // Build DHIS2 query URL parameters
-                const queryParams = new URLSearchParams(params as any).toString();
+                // Build human-readable decoded URL (NOT encoded)
+                // This URL will have : and ; characters, not %3A and %3B
+                const decodedParts: string[] = [];
+                Object.entries(params).forEach(([key, value]) => {
+                  if (key === 'dimension') {
+                    // Split dimension string into separate dx:, pe:, ou: parts
+                    // Input: "dx:A;B;C;pe:X;Y;ou:Z"
+                    // Output: ["dx:A;B;C", "pe:X;Y", "ou:Z"]
+                    const dimensionTypes = value.split(/;(?=(?:dx|pe|ou):)/);
+                    dimensionTypes.forEach(dim => {
+                      decodedParts.push(`dimension=${dim}`);
+                    });
+                  } else {
+                    decodedParts.push(`${key}=${value}`);
+                  }
+                });
+                const decodedUrl = `api/${endpoint}?${decodedParts.join('&')}`;
+                setGeneratedApiUrl(decodedUrl);
 
-                // Generate the API URL
-                const apiUrl = `api/${endpoint}?${queryParams}`;
-                setGeneratedApiUrl(apiUrl);
+                // For SQL comment, use encoded version
+                const queryParams = new URLSearchParams(params as any).toString();
 
                 // Use Superset's SQL Lab execute endpoint to preview data
                 const sql = `-- DHIS2: ${queryParams}\nSELECT * FROM ${endpoint} LIMIT 50`;
@@ -645,7 +764,7 @@ export default function DHIS2ParameterBuilder({
         bodyStyle={{ padding: 0 }}
       >
         <div style={{ display: 'flex', flexDirection: 'column', height: 600 }}>
-          {/* API URL Section with better design */}
+          {/* API URL Section - Single Decoded URL */}
           <div style={{
             padding: 20,
             backgroundColor: '#f5f5f5',
@@ -658,10 +777,10 @@ export default function DHIS2ParameterBuilder({
             <TextArea
               value={generatedApiUrl}
               readOnly
-              autoSize={{ minRows: 2, maxRows: 3 }}
+              autoSize={{ minRows: 2, maxRows: 4 }}
               style={{
                 fontFamily: 'Monaco, Consolas, "Courier New", monospace',
-                fontSize: 13,
+                fontSize: 12,
                 backgroundColor: '#fff',
                 border: '1px solid #d9d9d9',
                 borderRadius: 4,
@@ -672,7 +791,7 @@ export default function DHIS2ParameterBuilder({
               type="secondary"
               style={{ marginTop: 8, marginBottom: 0, fontSize: 12 }}
             >
-              💡 Use this URL to query DHIS2 directly or paste it into the API URL input field above
+              💡 Use this URL to query DHIS2 directly or paste it into other tools. URL uses readable format with <code>:</code> and <code>;</code> characters.
             </Paragraph>
           </div>
 

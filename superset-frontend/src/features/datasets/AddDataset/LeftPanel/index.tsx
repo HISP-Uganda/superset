@@ -224,6 +224,7 @@ export default function LeftPanel({
           <DHIS2ParameterBuilder
             databaseId={dataset.db?.id}
             endpoint={dataset.table_name}
+            initialDatasetName={dataset.table_name || undefined} 
             onParametersChange={(parameters) => {
               console.log('DHIS2 Parameters generated:', parameters);
               setDataset({
@@ -236,6 +237,15 @@ export default function LeftPanel({
               setDataset({
                 type: DatasetActionType.SetDHIS2Columns,
                 payload: { columns },
+              });
+            }}
+            onDatasetNameChange={(name) => {
+              console.log('DHIS2 Dataset name changed:', name);
+              // Store the custom name in dataset_name field
+              // DO NOT change table_name - it must remain as the source table (e.g., "analytics")
+              setDataset({
+                type: DatasetActionType.ChangeDataset,
+                payload: { name: 'dataset_name', value: name },
               });
             }}
           />

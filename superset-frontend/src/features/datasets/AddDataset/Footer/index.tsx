@@ -36,6 +36,7 @@ import {
   LOG_ACTIONS_DATASET_CREATION_SUCCESS,
 } from 'src/logger/LogUtils';
 import { DatasetObject } from '../types';
+import { parseSourceTable } from '../DHIS2ParameterBuilder';
 
 interface FooterProps {
   url: string;
@@ -94,22 +95,32 @@ function Footer({
 
   const onSave = (createChart: boolean = true) => {
     if (datasetObject) {
+      // For DHIS2 datasets: Use dataset_name (custom name like "analytics_version2")
+      // Parse the source table from it (e.g., "analytics")
+      const datasetIdentifier = datasetObject.dataset_name || datasetObject.table_name;
+
       const data: any = {
         database: datasetObject.db?.id,
         catalog: datasetObject.catalog,
         schema: datasetObject.schema,
-        table_name: datasetObject.table_name,
+        table_name: datasetIdentifier, // User's custom name (e.g., "analytics_malaria_20250110")
       };
 
       // Include DHIS2 parameters in SQL if present
       if (datasetObject.dhis2_parameters) {
-        // Embed parameters in SQL as block comment for the dialect to read
-        // Use & separator and /* */ format as expected by dhis2_dialect.py
+        // Parse the source table from the dataset name
+        // Example: "analytics_version2" -> "analytics"
+        const sourceTable = parseSourceTable(datasetIdentifier) || datasetObject.table_name;
+
+        // Embed both source table and parameters in SQL comment
         const paramsStr = Object.entries(datasetObject.dhis2_parameters)
           .map(([key, value]) => `${key}=${value}`)
           .join('&');
-        data.sql = `SELECT * FROM ${datasetObject.table_name}\n/* DHIS2: ${paramsStr} */`;
-        console.log('[DHIS2] Creating dataset with SQL:', data.sql);
+
+        // SQL includes source table in FROM clause and comment
+        data.sql = `SELECT * FROM ${sourceTable}\n/* DHIS2: table=${sourceTable}&${paramsStr} */`;
+        console.log('[DHIS2] Creating dataset:', datasetIdentifier, 'from source table:', sourceTable);
+        console.log('[DHIS2] SQL:', data.sql);
       }
 
       createResource(data).then(response => {

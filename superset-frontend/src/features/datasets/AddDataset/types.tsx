@@ -37,6 +37,7 @@ export interface DatasetObject {
   explore_url?: string;
   dhis2_parameters?: Record<string, string>;
   dhis2_columns?: Array<{ name: string; type: string }>;
+  dhis2_source_table?: string; // The actual DHIS2 table (e.g., "analytics")
 }
 
 export interface DatasetReducerPayloadType {
