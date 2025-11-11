@@ -7,13 +7,23 @@
 | **0** | OrgUnit Table Structure Investigation | ✅ **RESOLVED** | Info | None | Clarified that OrgUnits have dual purpose: metadata (rows) and dimension values (columns). Current structure is correct. |
 | **0.1** | SQL Lab Query Builder Implementation | 🔄 **PLANNED** | High | `SqlEditorLeftBar/index.tsx`<br>`DHIS2QueryBuilder/` | Basic MVP created but needs to reuse existing dataset creation component for consistency. |
 | **0.2** | URL Paste Feature for SQL Lab | ✅ **DESIGNED** | Medium | Documented implementation | Complete design for parsing DHIS2 API URLs and auto-populating query builder. Supports full URLs, relative paths, and parameter strings. |
-| **0.5** | Preview Data URL Format & Matching | ✅ **FIXED** | High | `DHIS2ParameterBuilder/index.tsx` | **Fixed dimension grouping** - URLs now properly format as `dimension=dx:A;B;C&dimension=pe:X;Y&dimension=ou:Z`. Single decoded URL display. Preview already fetches live data. |
+| **0.5** | Preview Data URL Format & Matching | ✅ **FIXED** | High | `DHIS2ParameterBuilder/index.tsx` | **Fixed dimension grouping** - URLs now properly format as `dimension=dx:A;B;C&dimension=pe:X;Y&dimension=ou:Z`. Single decoded URL display. Preview fetches live data with refresh button. |
+| **0.6** | Period Selection Limit (Max 5) | ✅ **FIXED** | Medium | `PeriodSelector.tsx` | **Removed MAX_PERIODS limit** - Users can now select unlimited periods. Removed limit warnings and "max 5" text. |
+| **0.7** | Data Element Filter Error | ✅ **FIXED** | High | `DHIS2ParameterBuilder/index.tsx` | **Fixed toLowerCase error** - Added type checking in filterOption to prevent `toLowerCase is not a function` error when typing in Data (dx) field. |
 | **1** | Dataset Name Not Editable | ✅ **FIXED** | High | `DHIS2ParameterBuilder/index.tsx`<br>`Footer/index.tsx`<br>`dhis2_dialect.py` | **Implemented smart naming pattern** - Auto-generates `{source_table}_{description}_{date}` format. Users can edit freely. Backend parses source table from name (e.g., `analytics_version2` → reads from `analytics`). Multiple datasets from same source table now supported. |
 | **2** | Disorganized Data in Query Builder | ❌ **OPEN** | High | Not started | Need hierarchical organization (groups → items) like DHIS2 Visualizer for Data Elements, Indicators, Periods, and OrgUnits. |
 | **3** | OrgUnit X-Axis Display Error | ✅ **FIXED** | 🔴 **CRITICAL** | `dhis2_dialect.py`<br>Frontend build files | **Fixed column typing** - OrgUnit/Period explicitly marked as `types.String()` with `is_dttm=False`. Added debug logging. Error: `Could not convert string 'Port LokoPujehunBonthe' to numeric` - resolved by proper type metadata. |
 | **Frontend** | Build Errors (theme, queryEditor) | ✅ **FIXED** | 🔴 **CRITICAL** | `DHIS2QueryBuilder/index.tsx`<br>`SqlEditorLeftBar/index.tsx` | Fixed theme token errors, added 'sql' field to queryEditor, removed unused functions. **Frontend compiled successfully**. |
 
-### 🎯 Current Session Achievements (2025-11-10)
+### 🎯 Current Session Achievements (2025-11-11)
+
+✅ **Completed:**
+1. **Issue 0.5** - Added refresh button to preview modal for live data fetching
+2. **Issue 0.6** - Removed period selection limit (was max 5, now unlimited)
+3. **Issue 0.7** - Fixed toLowerCase error in Data element filter function
+4. **Documentation** - Updated with all three fixes and implementation details
+
+### 🎯 Previous Session Achievements (2025-11-10)
 
 ✅ **Completed:**
 1. **Issue 0.5** - Fixed preview URL format to properly group dimensions by type
@@ -1444,6 +1454,213 @@ User configures:
     ↓
 Chart displays properly
 ```
+
+---
+
+## Issue 0.6: Period Selection Limit (Max 5) ✅ FIXED
+
+**Problem**: Period selector limited users to only 5 periods, which was too restrictive for many use cases.
+
+**Symptoms**:
+- User sees warning: "Maximum periods selected"
+- Cannot select more than 5 periods across all tabs (Years, Quarters, Months, Relative)
+- Warning message: "You can select up to 5 periods. Remove a period to add another."
+- Period selector shows "Select time periods for your data (max 5)"
+
+**Root Cause**:
+The `MAX_PERIODS = 5` constant in `PeriodSelector.tsx` artificially limited selections.
+
+**Solution Implemented**:
+
+1. **Removed MAX_PERIODS constant** (line 26):
+```typescript
+// Before:
+const MAX_PERIODS = 5;
+
+// After:
+// Removed MAX_PERIODS limit - users can select as many periods as needed
+```
+
+2. **Removed limit checks and warnings**:
+- Removed `isLimitReached` checks
+- Removed `remainingSlots` calculations
+- Removed Alert warnings about limit
+- Removed disabled states when limit reached
+
+3. **Updated onChange handlers** (all tabs):
+```typescript
+// Before:
+onChange([...otherPeriods, ...selectedYears].slice(0, MAX_PERIODS));
+
+// After:
+onChange([...otherPeriods, ...selectedYears]);
+```
+
+4. **Increased maxTagCount** for better display:
+```typescript
+maxTagCount={10}  // Was 5, now 10 for better visibility
+```
+
+5. **Updated display text**:
+```typescript
+// Before:
+{t('Selected')} ({value.length}/{MAX_PERIODS}):
+
+// After:
+{t('Selected')} ({value.length}):
+```
+
+6. **Removed "(max 5)" from description** in `DHIS2ParameterBuilder/index.tsx`:
+```typescript
+// Before:
+{t('Select time periods for your data (max 5)')}
+
+// After:
+{t('Select time periods for your data')}
+```
+
+**Files Modified**:
+- `superset-frontend/src/features/datasets/AddDataset/DHIS2ParameterBuilder/PeriodSelector.tsx`
+- `superset-frontend/src/features/datasets/AddDataset/DHIS2ParameterBuilder/index.tsx`
+
+**Impact**:
+- ✅ Users can select unlimited periods
+- ✅ Better support for trend analysis over many time periods
+- ✅ No more artificial restrictions
+- ✅ Consistent with DHIS2's flexible period selection
+
+---
+
+## Issue 0.7: Data Element Filter Error ✅ FIXED
+
+**Problem**: Typing in the Data (dx) field caused a JavaScript error that broke filtering.
+
+**Error Message**:
+```
+ERROR
+_option$children.toLowerCase is not a function
+TypeError: _option$children.toLowerCase is not a function
+    at filterOption (DHIS2ParameterBuilder/index.tsx:358:2742)
+```
+
+**Root Cause**:
+The `filterOption` function assumed `option?.children` was always a string, but it could be a React element or other type.
+
+**Original Code** (line 482-484):
+```typescript
+filterOption={(input, option) =>
+  (option?.children as string)?.toLowerCase().includes(input.toLowerCase())
+}
+```
+
+**Problem**: Type assertion `as string` doesn't actually convert the value—it just tells TypeScript to treat it as a string. If `children` is actually a React element (like a disabled group header), calling `toLowerCase()` fails.
+
+**Solution Implemented**:
+
+Added type checking before calling `toLowerCase()`:
+
+```typescript
+filterOption={(input, option) => {
+  const children = option?.children;
+  if (typeof children === 'string') {
+    return children.toLowerCase().includes(input.toLowerCase());
+  }
+  return false;
+}}
+```
+
+**Why This Works**:
+- ✅ Runtime type check ensures `children` is actually a string
+- ✅ Returns `false` for non-string children (like group headers)
+- ✅ Prevents error when typing in search field
+- ✅ Maintains search functionality for actual data element options
+
+**Files Modified**:
+- `superset-frontend/src/features/datasets/AddDataset/DHIS2ParameterBuilder/index.tsx` (line 482-488)
+
+**Impact**:
+- ✅ Search/filter works correctly
+- ✅ No more JavaScript errors when typing
+- ✅ Better user experience
+- ✅ Proper TypeScript type safety
+
+---
+
+## Issue 0.5 Enhancement: Preview Data Refresh Button ✅ IMPROVED
+
+**Enhancement**: Added refresh functionality to preview modal to fetch latest data.
+
+**Context**:
+The preview already fetched live data, but there was no way to re-fetch if:
+- User changed selections after opening preview
+- Data changed in DHIS2
+- User wanted to verify current parameters
+
+**Solution Implemented**:
+
+1. **Extracted preview logic into reusable function** (line 413-527):
+```typescript
+const fetchPreviewData = async () => {
+  // ... builds parameters from current selections
+  // ... fetches live data via SQL Lab API
+  // ... updates preview modal state
+};
+```
+
+2. **Added refresh state**:
+```typescript
+const [isRefreshing, setIsRefreshing] = useState(false);
+```
+
+3. **Updated Preview Data button** to use new function:
+```typescript
+<Button
+  type="primary"
+  onClick={fetchPreviewData}
+  loading={isRefreshing}
+  disabled={selectedData.length === 0}
+>
+  {t('Preview Data')}
+</Button>
+```
+
+4. **Added Refresh button in modal footer**:
+```typescript
+footer={[
+  <Button
+    key="refresh"
+    onClick={fetchPreviewData}
+    loading={isRefreshing}
+    icon={<span>🔄</span>}
+  >
+    Refresh Data
+  </Button>,
+  // ... Copy URL and Close buttons
+]}
+```
+
+5. **Updated helper text**:
+```typescript
+{t('Click to preview live data and see the generated API URL')}
+```
+
+**Files Modified**:
+- `superset-frontend/src/features/datasets/AddDataset/DHIS2ParameterBuilder/index.tsx`
+
+**Impact**:
+- ✅ Users can refresh preview without closing modal
+- ✅ Confirms data is live and matches current selections
+- ✅ Better developer experience for testing
+- ✅ Cleaner code with extracted function
+
+**How It Works**:
+1. User clicks "Preview Data" → fetches data based on current selections
+2. Preview modal opens showing live data + API URL
+3. User can click "Refresh Data" button to re-fetch with latest selections
+4. Loading state shown during refresh
+5. Table updates with fresh data
+
+---
 
 ## Notes
 

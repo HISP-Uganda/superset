@@ -1076,12 +1076,15 @@ class DHIS2Cursor:
     def _extract_query_params(self, query: str) -> dict[str, str]:
         """
         Extract query parameters from SQL WHERE clause or comments OR cached params
-        Supports:
-        - Application cache (persists across requests)
-        - Flask g.dhis2_dataset_params (same-request access)
-        - WHERE field='value' AND field2='value2'
-        - -- DHIS2: param1=value1, param2=value2
-        - /* DHIS2: param1=value1&param2=value2 */
+
+        Priority Order (highest to lowest):
+        1. SQL comments (/* DHIS2: ... */ or -- DHIS2: ...) - Always live/current
+        2. Flask g.dhis2_dataset_params (same-request access)
+        3. Application cache (persists across requests) - Fallback only
+        4. WHERE clause
+
+        This ensures preview/ad-hoc queries with SQL comments always use fresh parameters,
+        while saved datasets can still use cached parameters.
         """
         from urllib.parse import unquote
         from flask import g
@@ -1090,55 +1093,8 @@ class DHIS2Cursor:
         from_match = re.search(r'FROM\s+(\w+)', query, re.IGNORECASE)
         table_name = from_match.group(1) if from_match else "analytics"
 
-        # FIRST: Check application cache (persists across requests)
-        cache_param_str = None
-        try:
-            from superset.extensions import cache_manager
-            # Try to find cached params by table name (we cache with dataset ID pattern)
-            # Search for any cache key matching this table
-            cache_keys = [f"dhis2_params_{i}_{table_name}" for i in range(1, 200)]  # Check dataset IDs 1-200
-            for cache_key in cache_keys:
-                cached = cache_manager.data_cache.get(cache_key)
-                if cached:
-                    cache_param_str = cached
-                    print(f"[DHIS2] Found params in cache for {table_name}: {cache_param_str[:100]}")
-                    logger.info(f"Using cached parameters for table: {table_name}")
-                    break
-        except Exception as e:
-            logger.warning(f"[DHIS2] Could not check cache: {e}")
-
-        if cache_param_str:
-            separator = '&' if '&' in cache_param_str else ','
-            for param in cache_param_str.split(separator):
-                if '=' in param:
-                    key, value = param.split('=', 1)
-                    key, value = key.strip(), value.strip()
-                    if key == 'dimension':
-                        params[key] = f"{params[key]};{value}" if key in params else value
-                    else:
-                        params[key] = value
-            if params:
-                return params
-
-        # SECOND: Check Flask g context for parameters (same-request access)
-        if hasattr(g, 'dhis2_dataset_params'):
-            if table_name in g.dhis2_dataset_params:
-                param_str = g.dhis2_dataset_params[table_name]
-                print(f"[DHIS2] Found params in Flask g for {table_name}: {param_str[:100]}")
-                logger.info(f"Using stored parameters from Flask g for table: {table_name}")
-                separator = '&' if '&' in param_str else ','
-                for param in param_str.split(separator):
-                    if '=' in param:
-                        key, value = param.split('=', 1)
-                        key, value = key.strip(), value.strip()
-                        if key == 'dimension':
-                            params[key] = f"{params[key]};{value}" if key in params else value
-                        else:
-                            params[key] = value
-                if params:
-                    return params
-
-        # SECOND: Extract from SQL block comments (/* DHIS2: key=value&key2=value2 */)
+        # FIRST: Check SQL comments (highest priority - always current/live)
+        # Extract from SQL block comments (/* DHIS2: key=value&key2=value2 */)
         block_comment_match = re.search(r'/\*\s*DHIS2:\s*(.+?)\s*\*/', query, re.IGNORECASE | re.DOTALL)
         if block_comment_match:
             param_str = block_comment_match.group(1).strip()
@@ -1187,7 +1143,61 @@ class DHIS2Cursor:
                     else:
                         params[key] = value
 
-        # Extract from WHERE clause
+        # If SQL comments provided parameters, use them (highest priority)
+        if params:
+            print(f"[DHIS2] Using parameters from SQL comments: {list(params.keys())}")
+            logger.info(f"Using parameters from SQL comments (live/current)")
+            return params
+
+        # SECOND: Check Flask g context for parameters (same-request access)
+        if hasattr(g, 'dhis2_dataset_params'):
+            if table_name in g.dhis2_dataset_params:
+                param_str = g.dhis2_dataset_params[table_name]
+                print(f"[DHIS2] Found params in Flask g for {table_name}: {param_str[:100]}")
+                logger.info(f"Using stored parameters from Flask g for table: {table_name}")
+                separator = '&' if '&' in param_str else ','
+                for param in param_str.split(separator):
+                    if '=' in param:
+                        key, value = param.split('=', 1)
+                        key, value = key.strip(), value.strip()
+                        if key == 'dimension':
+                            params[key] = f"{params[key]};{value}" if key in params else value
+                        else:
+                            params[key] = value
+                if params:
+                    return params
+
+        # THIRD: Check application cache (persists across requests) - Fallback only
+        cache_param_str = None
+        try:
+            from superset.extensions import cache_manager
+            # Try to find cached params by table name (we cache with dataset ID pattern)
+            # Search for any cache key matching this table
+            cache_keys = [f"dhis2_params_{i}_{table_name}" for i in range(1, 200)]  # Check dataset IDs 1-200
+            for cache_key in cache_keys:
+                cached = cache_manager.data_cache.get(cache_key)
+                if cached:
+                    cache_param_str = cached
+                    print(f"[DHIS2] Found params in cache for {table_name}: {cache_param_str[:100]}")
+                    logger.info(f"Using cached parameters for table: {table_name} (fallback)")
+                    break
+        except Exception as e:
+            logger.warning(f"[DHIS2] Could not check cache: {e}")
+
+        if cache_param_str:
+            separator = '&' if '&' in cache_param_str else ','
+            for param in cache_param_str.split(separator):
+                if '=' in param:
+                    key, value = param.split('=', 1)
+                    key, value = key.strip(), value.strip()
+                    if key == 'dimension':
+                        params[key] = f"{params[key]};{value}" if key in params else value
+                    else:
+                        params[key] = value
+            if params:
+                return params
+
+        # FOURTH: Extract from WHERE clause (lowest priority)
         where_match = re.search(r'WHERE\s+(.+?)(?:ORDER BY|GROUP BY|LIMIT|$)', query, re.IGNORECASE | re.DOTALL)
         if where_match:
             conditions = where_match.group(1)

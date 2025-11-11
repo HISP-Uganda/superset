@@ -144,6 +144,7 @@ export default function DHIS2ParameterBuilder({
   const [previewData, setPreviewData] = useState<any[]>([]);
   const [previewColumns, setPreviewColumns] = useState<any[]>([]);
   const [generatedApiUrl, setGeneratedApiUrl] = useState<string>(''); // Human-readable decoded URL
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
   // Load metadata from DHIS2 when component mounts or level changes
   useEffect(() => {
@@ -409,6 +410,135 @@ export default function DHIS2ParameterBuilder({
     }
   };
 
+  // Function to fetch preview data (can be called on initial preview or refresh)
+  const fetchPreviewData = async () => {
+    if (!databaseId) {
+      alert('No database selected');
+      return;
+    }
+
+    // Build parameters for all endpoint types
+    const params: Record<string, string> = {};
+
+    if (endpoint === 'analytics') {
+      const dimensions = [];
+      if (selectedData.length > 0) {
+        dimensions.push(`dx:${selectedData.join(';')}`);
+      }
+      if (selectedPeriods.length > 0) {
+        dimensions.push(`pe:${selectedPeriods.join(';')}`);
+      }
+      if (selectedOrgUnits.length > 0) {
+        dimensions.push(`ou:${selectedOrgUnits.join(';')}`);
+      }
+      if (dimensions.length > 0) {
+        params.dimension = dimensions.join(';');
+      }
+      params.displayProperty = 'NAME';
+      params.skipMeta = 'false';
+    } else if (endpoint === 'dataValueSets') {
+      if (selectedData.length > 0) {
+        params.dataElement = selectedData.join(',');
+      }
+      if (selectedPeriods.length > 0) {
+        params.period = selectedPeriods.join(',');
+      }
+      if (selectedOrgUnits.length > 0) {
+        params.orgUnit = selectedOrgUnits.join(',');
+      }
+    } else {
+      // Other endpoints use filter parameter
+      if (selectedData.length > 0) {
+        params.filter = `id:in:[${selectedData.join(',')}]`;
+      }
+      params.fields = 'id,displayName,name,code,created,lastUpdated';
+      params.paging = 'false';
+    }
+
+    // Validate that at least one data element is selected
+    if (!params.dimension && !params.dataElement && !params.filter) {
+      alert('Please select at least one data element or indicator');
+      return;
+    }
+
+    setIsRefreshing(true);
+    try {
+      // Build human-readable decoded URL (NOT encoded)
+      const decodedParts: string[] = [];
+      Object.entries(params).forEach(([key, value]) => {
+        if (key === 'dimension') {
+          const dimensionTypes = value.split(/;(?=(?:dx|pe|ou):)/);
+          dimensionTypes.forEach(dim => {
+            decodedParts.push(`dimension=${dim}`);
+          });
+        } else {
+          decodedParts.push(`${key}=${value}`);
+        }
+      });
+      const decodedUrl = `api/${endpoint}?${decodedParts.join('&')}`;
+      setGeneratedApiUrl(decodedUrl);
+
+      // For SQL comment, manually build query string to handle multiple dimension parameters
+      // URLSearchParams doesn't support multiple values for same key properly
+      const sqlCommentParts: string[] = [];
+      Object.entries(params).forEach(([key, value]) => {
+        if (key === 'dimension') {
+          // Split dimension string and create separate parameters
+          const dimensionTypes = value.split(/;(?=(?:dx|pe|ou):)/);
+          dimensionTypes.forEach(dim => {
+            sqlCommentParts.push(`dimension=${encodeURIComponent(dim)}`);
+          });
+        } else {
+          sqlCommentParts.push(`${key}=${encodeURIComponent(value)}`);
+        }
+      });
+      const queryParams = sqlCommentParts.join('&');
+
+      // Use Superset's SQL Lab execute endpoint to preview data
+      const sql = `-- DHIS2: ${queryParams}\nSELECT * FROM ${endpoint} LIMIT 50`;
+
+      const response = await SupersetClient.post({
+        endpoint: `/api/v1/sqllab/execute/`,
+        jsonPayload: {
+          database_id: databaseId,
+          sql,
+          schema: 'dhis2',
+        },
+      });
+
+      console.log('Preview data response:', response.json);
+
+      if (response.json.data && response.json.data.length > 0) {
+        // Convert columns to Ant Design Table format
+        const columns = response.json.columns.map((col: any) => ({
+          title: col.name,
+          dataIndex: col.name,
+          key: col.name,
+          ellipsis: true,
+        }));
+
+        // Add row keys for Ant Design Table
+        const dataWithKeys = response.json.data.map((row: any, idx: number) => ({
+          ...row,
+          key: idx,
+        }));
+
+        setPreviewColumns(columns);
+        setPreviewData(dataWithKeys);
+        setPreviewVisible(true);
+      } else {
+        alert('⚠️ No data returned.\n\nPossible reasons:\n- No data exists for these parameters\n- Check if IDs are correct\n- Try different date range');
+        console.log('Empty response:', response.json);
+      }
+    } catch (error: any) {
+      console.error('Preview error:', error);
+      const errorMsg = error.message || error.toString();
+      alert(`❌ Error loading preview:\n\n${errorMsg}\n\nCheck browser console for details.`);
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
+
   // Show builder for ALL DHIS2 endpoints
   if (!endpoint) {
     return null;
@@ -479,9 +609,13 @@ export default function DHIS2ParameterBuilder({
             value={selectedData}
             onChange={setSelectedData}
             loading={loading}
-            filterOption={(input, option) =>
-              (option?.children as string)?.toLowerCase().includes(input.toLowerCase())
-            }
+            filterOption={(input, option) => {
+              const children = option?.children;
+              if (typeof children === 'string') {
+                return children.toLowerCase().includes(input.toLowerCase());
+              }
+              return false;
+            }}
           >
             {indicators.length > 0 && (
               <>
@@ -530,7 +664,7 @@ export default function DHIS2ParameterBuilder({
         <ParameterSection>
           <Title level={5}>{t('Period (pe)')}</Title>
           <Paragraph type="secondary">
-            {t('Select time periods for your data (max 5)')}
+            {t('Select time periods for your data')}
           </Paragraph>
           <PeriodSelector
             databaseId={databaseId!}
@@ -607,131 +741,14 @@ export default function DHIS2ParameterBuilder({
         <ParameterSection>
           <Button
             type="primary"
-            onClick={async () => {
-              if (!databaseId) {
-                alert('No database selected');
-                return;
-              }
-
-              // Build parameters for all endpoint types
-              const params: Record<string, string> = {};
-
-              if (endpoint === 'analytics') {
-                const dimensions = [];
-                if (selectedData.length > 0) {
-                  dimensions.push(`dx:${selectedData.join(';')}`);
-                }
-                if (selectedPeriods.length > 0) {
-                  dimensions.push(`pe:${selectedPeriods.join(';')}`);
-                }
-                if (selectedOrgUnits.length > 0) {
-                  dimensions.push(`ou:${selectedOrgUnits.join(';')}`);
-                }
-                if (dimensions.length > 0) {
-                  params.dimension = dimensions.join(';');
-                }
-                params.displayProperty = 'NAME';
-                params.skipMeta = 'false';
-              } else if (endpoint === 'dataValueSets') {
-                if (selectedData.length > 0) {
-                  params.dataElement = selectedData.join(',');
-                }
-                if (selectedPeriods.length > 0) {
-                  params.period = selectedPeriods.join(',');
-                }
-                if (selectedOrgUnits.length > 0) {
-                  params.orgUnit = selectedOrgUnits.join(',');
-                }
-              } else {
-                // Other endpoints use filter parameter
-                if (selectedData.length > 0) {
-                  params.filter = `id:in:[${selectedData.join(',')}]`;
-                }
-                params.fields = 'id,displayName,name,code,created,lastUpdated';
-                params.paging = 'false';
-              }
-
-              // Validate that at least one data element is selected
-              if (!params.dimension && !params.dataElement && !params.filter) {
-                alert('Please select at least one data element or indicator');
-                return;
-              }
-
-              setLoading(true);
-              try {
-                // Build human-readable decoded URL (NOT encoded)
-                // This URL will have : and ; characters, not %3A and %3B
-                const decodedParts: string[] = [];
-                Object.entries(params).forEach(([key, value]) => {
-                  if (key === 'dimension') {
-                    // Split dimension string into separate dx:, pe:, ou: parts
-                    // Input: "dx:A;B;C;pe:X;Y;ou:Z"
-                    // Output: ["dx:A;B;C", "pe:X;Y", "ou:Z"]
-                    const dimensionTypes = value.split(/;(?=(?:dx|pe|ou):)/);
-                    dimensionTypes.forEach(dim => {
-                      decodedParts.push(`dimension=${dim}`);
-                    });
-                  } else {
-                    decodedParts.push(`${key}=${value}`);
-                  }
-                });
-                const decodedUrl = `api/${endpoint}?${decodedParts.join('&')}`;
-                setGeneratedApiUrl(decodedUrl);
-
-                // For SQL comment, use encoded version
-                const queryParams = new URLSearchParams(params as any).toString();
-
-                // Use Superset's SQL Lab execute endpoint to preview data
-                const sql = `-- DHIS2: ${queryParams}\nSELECT * FROM ${endpoint} LIMIT 50`;
-
-                const response = await SupersetClient.post({
-                  endpoint: `/api/v1/sqllab/execute/`,
-                  jsonPayload: {
-                    database_id: databaseId,
-                    sql,
-                    schema: 'dhis2',
-                  },
-                });
-
-                console.log('Preview data response:', response.json);
-
-                if (response.json.data && response.json.data.length > 0) {
-                  // Convert columns to Ant Design Table format
-                  const columns = response.json.columns.map((col: any) => ({
-                    title: col.name,
-                    dataIndex: col.name,
-                    key: col.name,
-                    ellipsis: true,
-                  }));
-
-                  // Add row keys for Ant Design Table
-                  const dataWithKeys = response.json.data.map((row: any, idx: number) => ({
-                    ...row,
-                    key: idx,
-                  }));
-
-                  setPreviewColumns(columns);
-                  setPreviewData(dataWithKeys);
-                  setPreviewVisible(true);
-                } else {
-                  alert('⚠️ No data returned.\n\nPossible reasons:\n- No data exists for these parameters\n- Check if IDs are correct\n- Try different date range');
-                  console.log('Empty response:', response.json);
-                }
-              } catch (error: any) {
-                console.error('Preview error:', error);
-                const errorMsg = error.message || error.toString();
-                alert(`❌ Error loading preview:\n\n${errorMsg}\n\nCheck browser console for details.`);
-              } finally {
-                setLoading(false);
-              }
-            }}
-            loading={loading}
+            onClick={fetchPreviewData}
+            loading={isRefreshing}
             disabled={selectedData.length === 0}
           >
             {t('Preview Data')}
           </Button>
           <Paragraph type="secondary" style={{ marginTop: 8, fontSize: 12 }}>
-            {t('Click to preview data and see the generated API URL')}
+            {t('Click to preview live data and see the generated API URL')}
           </Paragraph>
         </ParameterSection>
       </Space>
@@ -748,6 +765,14 @@ export default function DHIS2ParameterBuilder({
         onCancel={() => setPreviewVisible(false)}
         width={1200}
         footer={[
+          <Button
+            key="refresh"
+            onClick={fetchPreviewData}
+            loading={isRefreshing}
+            icon={<span>🔄</span>}
+          >
+            Refresh Data
+          </Button>,
           <Button
             key="copy"
             onClick={() => {

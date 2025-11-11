@@ -23,7 +23,7 @@ import { styled, SupersetClient, t } from '@superset-ui/core';
 const { TabPane } = Tabs;
 const { Option } = Select;
 
-const MAX_PERIODS = 5;
+// Removed MAX_PERIODS limit - users can select as many periods as needed
 
 const StyledContainer = styled.div`
   .ant-tabs-nav {
@@ -96,9 +96,6 @@ export const PeriodSelector: React.FC<PeriodSelectorProps> = ({
     onChange(value.filter(p => p !== periodId));
   };
 
-  const isLimitReached = value.length >= MAX_PERIODS;
-  const remainingSlots = MAX_PERIODS - value.length;
-
   // Get display name for selected period
   const getPeriodDisplayName = (periodId: string): string => {
     const allPeriods = [...years, ...quarters, ...months, ...relativePeriods];
@@ -108,25 +105,6 @@ export const PeriodSelector: React.FC<PeriodSelectorProps> = ({
 
   return (
     <StyledContainer>
-      {isLimitReached && (
-        <Alert
-          message={t('Maximum periods selected')}
-          description={t(`You can select up to ${MAX_PERIODS} periods. Remove a period to add another.`)}
-          type="warning"
-          showIcon
-          className="period-limit-warning"
-        />
-      )}
-
-      {!isLimitReached && value.length > 0 && (
-        <Alert
-          message={t(`${remainingSlots} more period${remainingSlots > 1 ? 's' : ''} available`)}
-          type="info"
-          showIcon
-          className="period-limit-warning"
-        />
-      )}
-
       <Tabs activeKey={activeTab} onChange={setActiveTab}>
         <TabPane tab={t('Years')} key="years">
           <Select
@@ -136,17 +114,15 @@ export const PeriodSelector: React.FC<PeriodSelectorProps> = ({
             value={value.filter(p => years.some(y => y.id === p))}
             onChange={(selectedYears) => {
               const otherPeriods = value.filter(p => !years.some(y => y.id === p));
-              onChange([...otherPeriods, ...selectedYears].slice(0, MAX_PERIODS));
+              onChange([...otherPeriods, ...selectedYears]);
             }}
             loading={loading}
-            disabled={isLimitReached && !value.some(p => years.some(y => y.id === p))}
-            maxTagCount={5}
+            maxTagCount={10}
           >
             {years.map(period => (
               <Option
                 key={period.id}
                 value={period.id}
-                disabled={isLimitReached && !value.includes(period.id)}
               >
                 {period.displayName}
               </Option>
@@ -162,17 +138,15 @@ export const PeriodSelector: React.FC<PeriodSelectorProps> = ({
             value={value.filter(p => quarters.some(q => q.id === p))}
             onChange={(selectedQuarters) => {
               const otherPeriods = value.filter(p => !quarters.some(q => q.id === p));
-              onChange([...otherPeriods, ...selectedQuarters].slice(0, MAX_PERIODS));
+              onChange([...otherPeriods, ...selectedQuarters]);
             }}
             loading={loading}
-            disabled={isLimitReached && !value.some(p => quarters.some(q => q.id === p))}
-            maxTagCount={5}
+            maxTagCount={10}
           >
             {quarters.map(period => (
               <Option
                 key={period.id}
                 value={period.id}
-                disabled={isLimitReached && !value.includes(period.id)}
               >
                 {period.displayName}
               </Option>
@@ -188,17 +162,15 @@ export const PeriodSelector: React.FC<PeriodSelectorProps> = ({
             value={value.filter(p => months.some(m => m.id === p))}
             onChange={(selectedMonths) => {
               const otherPeriods = value.filter(p => !months.some(m => m.id === p));
-              onChange([...otherPeriods, ...selectedMonths].slice(0, MAX_PERIODS));
+              onChange([...otherPeriods, ...selectedMonths]);
             }}
             loading={loading}
-            disabled={isLimitReached && !value.some(p => months.some(m => m.id === p))}
-            maxTagCount={5}
+            maxTagCount={10}
           >
             {months.map(period => (
               <Option
                 key={period.id}
                 value={period.id}
-                disabled={isLimitReached && !value.includes(period.id)}
               >
                 {period.displayName}
               </Option>
@@ -214,17 +186,15 @@ export const PeriodSelector: React.FC<PeriodSelectorProps> = ({
             value={value.filter(p => relativePeriods.some(r => r.id === p))}
             onChange={(selectedRelative) => {
               const otherPeriods = value.filter(p => !relativePeriods.some(r => r.id === p));
-              onChange([...otherPeriods, ...selectedRelative].slice(0, MAX_PERIODS));
+              onChange([...otherPeriods, ...selectedRelative]);
             }}
             loading={loading}
-            disabled={isLimitReached && !value.some(p => relativePeriods.some(r => r.id === p))}
-            maxTagCount={5}
+            maxTagCount={10}
           >
             {relativePeriods.map(period => (
               <Option
                 key={period.id}
                 value={period.id}
-                disabled={isLimitReached && !value.includes(period.id)}
               >
                 {period.displayName}
               </Option>
@@ -236,7 +206,7 @@ export const PeriodSelector: React.FC<PeriodSelectorProps> = ({
       {value.length > 0 && (
         <div className="selected-periods-container">
           <span style={{ marginRight: 8, fontWeight: 'bold' }}>
-            {t('Selected')} ({value.length}/{MAX_PERIODS}):
+            {t('Selected')} ({value.length}):
           </span>
           {value.map(periodId => (
             <Tag
